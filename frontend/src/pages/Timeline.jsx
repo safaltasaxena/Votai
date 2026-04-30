@@ -7,7 +7,7 @@ const Timeline = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [timeline, setTimeline] = useState(null);
-  const regionId = localStorage.getItem('votai_region') || 'IN-MH';
+  const regionId = localStorage.getItem('votai_region_id') || 'IN-MH';
 
   useEffect(() => {
     const fetchTimeline = async () => {
@@ -26,7 +26,7 @@ const Timeline = () => {
   }, [regionId]);
 
   if (loading) return <div className="page"><p>Loading timeline...</p></div>;
-  
+
   if (error) return (
     <div className="page" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
       <p style={{ color: '#ef4444', marginBottom: '1.5rem' }}>{error}</p>
@@ -67,8 +67,8 @@ const Timeline = () => {
 
       <div className="timeline-list">
         {events.map((item, index) => (
-          <div 
-            key={index} 
+          <div
+            key={index}
             className="timeline-item"
             style={item.urgent ? { borderColor: '#eab308' } : {}}
           >

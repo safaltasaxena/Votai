@@ -17,7 +17,7 @@ const handleResponse = async (response) => {
 
 export const api = {
   // ── Journey ────────────────────────────────────────────────────────────────
-  
+
   createUser: async (userData) => {
     // Backend expects: user_id, age, country, state, language, first_time_voter
     const response = await fetch(`${API_BASE}/journey/onboard`, {
@@ -28,7 +28,7 @@ export const api = {
     return handleResponse(response);
   },
 
-  getCurrentStep: async (userId, regionId = 'unknown', message = null) => {
+  getCurrentStep: async (userId, regionId, message = null) => {
     let url = `${API_BASE}/journey/${userId}/step?region=${regionId}`;
     if (message) {
       url += `&message=${encodeURIComponent(message)}`;

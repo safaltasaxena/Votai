@@ -48,7 +48,7 @@ const PartyExplorer = () => {
   const [error, setError] = useState(null);
   const [parties, setParties] = useState([]);
   const [disclaimer, setDisclaimer] = useState('');
-  const regionId = localStorage.getItem('votai_region') || 'IN-MH';
+  const regionId = localStorage.getItem('votai_region_id') || 'IN-MH';
 
   useEffect(() => {
     const fetchParties = async () => {

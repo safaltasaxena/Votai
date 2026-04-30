@@ -28,7 +28,6 @@ _PARTY_DISCLAIMER = (
     "recommend or endorse any candidate or party."
 )
 
-
 @router.get("/{region_id}")
 async def list_parties(region_id: str):
     """
@@ -39,15 +38,7 @@ async def list_parties(region_id: str):
     """
     parties = get_parties(region_id)
 
-    if not parties:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No party data found for region '{region_id}'. "
-                   f"Data may not have been seeded yet.",
-        )
-
-    logger.info("Parties fetched (region_id=%s, count=%d)", region_id, len(parties))
-
+    # ✅ FIX: do NOT throw error
     return {
         "success": True,
         "region_id": region_id,

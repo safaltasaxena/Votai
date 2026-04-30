@@ -58,13 +58,13 @@ async def get_election_timeline(region_id: str):
 
     # Extract only the fields needed for the timeline view.
     timeline = {
-        "region_id": region_id,
-        "state": data.get("state"),
-        "election_date": data.get("election_date"),
-        "registration_deadline": data.get("registration_deadline"),
-        "verification_deadline": data.get("verification_deadline"),
-        "process_steps": data.get("process_steps", []),
-        "official_portal": data.get("official_portal"),
+    "region_id": region_id,
+    "state": data.get("state"),
+    "election_date": data.get("election_date") or "Not available",
+    "registration_deadline": data.get("registration_deadline") or "Not available",
+    "verification_deadline": data.get("verification_deadline") or "Not available",
+    "process_steps": data.get("process_steps", []),
+    "official_portal": data.get("official_portal"),
     }
 
     return {"success": True, "timeline": timeline}
