@@ -20,20 +20,11 @@ CALL STRATEGY (Phase 5 MVP):
   enough context to guide the model's behaviour without needing a
   separate classification call. Multi-call architecture is Phase 6.
 """
-import vertexai
-from vertexai.generative_models import GenerativeModel
-
-PROJECT_ID = "votai-494905"
-LOCATION = "us-central1"
-
-vertexai.init(project=PROJECT_ID, location=LOCATION)
-
-model = GenerativeModel("gemini-1.0-pro")
 
 import logging
 import re
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig
@@ -44,10 +35,15 @@ logger = logging.getLogger(__name__)
 
 # ── Vertex AI initialisation ───────────────────────────────────────────────────
 # Runs once when this module is first imported.
-# Uses PROJECT_ID and REGION from config (loaded from .env).
-vertexai.init(project=settings.project_id, location=settings.region)
+PROJECT_ID = "votai-494905"
+LOCATION = "us-central1"
+
+vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 MODEL_NAME = "gemini-1.0-pro"
+
+# Module-level model instance — reused across all requests.
+model = GenerativeModel(MODEL_NAME)
 
 # Conservative generation config — keeps responses factual and concise.
 _GENERATION_CONFIG = GenerationConfig(
@@ -85,10 +81,6 @@ class AIResult:
 
 
 # ── Prompt templates ───────────────────────────────────────────────────────────
-# Each template follows the same structure:
-#   ROLE → CONTEXT → TASK → CONSTRAINTS → OUTPUT FORMAT
-# Keeping templates here (not in routers) means prompt changes
-# never require touching route files.
 
 def _prompt_explain_step(
     step_name: str,
@@ -97,10 +89,7 @@ def _prompt_explain_step(
     region: str,
     language: str,
 ) -> str:
-    """
-    Template 1 — Explain a journey step in the context of a user question.
-    Used for: GET /journey/{user_id}/step?message=...
-    """
+    """Template 1 — Explain a journey step in the context of a user question."""
     return f"""
 ROLE:
 You are an AI Election Navigator — a neutral, factual guidance assistant.
@@ -125,8 +114,6 @@ CONSTRAINTS:
 - Keep language simple. Avoid legal jargon.
 
 OUTPUT FORMAT:
-Return your response in exactly this structure:
-
 EXPLANATION:
 <2-4 sentences explaining the concept or answering the question>
 
@@ -147,10 +134,7 @@ def _prompt_generate_timeline(
     verification_deadline: str,
     process_steps: list[str],
 ) -> str:
-    """
-    Template 2 — Explain the election timeline for a region.
-    Used for: GET /elections/{region_id}/timeline with AI explanation.
-    """
+    """Template 2 — Explain the election timeline for a region."""
     steps_text = "\n".join(f"- {s}" for s in process_steps)
     return f"""
 ROLE:
@@ -188,10 +172,7 @@ NEXT ACTION:
 
 
 def _prompt_simplify_policy(policy_text: str, language: str) -> str:
-    """
-    Template 3 — Simplify a policy statement into plain language.
-    Used for: party detail views with complex policy text.
-    """
+    """Template 3 — Simplify a policy statement into plain language."""
     return f"""
 ROLE:
 You are an AI Election Navigator simplifying policy information.
@@ -228,13 +209,7 @@ def _prompt_compare_parties(
     region: str,
     language: str,
 ) -> str:
-    """
-    Template 4 — Present party information side-by-side in a neutral way.
-    Used for: GET /parties/{region_id} with AI-generated summary.
-
-    CRITICAL: No ranking, no recommendation, no evaluative language.
-    Disclaimer is always appended by post-processing.
-    """
+    """Template 4 — Present party information side-by-side in a neutral way."""
     party_blocks = []
     for party in party_data:
         name = party.get("name", "Unknown")
@@ -283,27 +258,22 @@ Consider which focus areas align with issues important to you — without pressu
 def call_gemini(prompt: str) -> AIResult:
     """
     Execute a single Gemini call with the system prompt and return structured output.
-
-    This is the only function that touches the Gemini API.
-    All prompt-building happens in the template functions above.
-    All response parsing happens in _parse_response() below.
-    Post-processing (neutrality enforcement) runs before returning.
+    This is the only function that touches the Gemini API for structured results.
     """
-    model = GenerativeModel(
+    _model = GenerativeModel(
         model_name=MODEL_NAME,
         system_instruction=_SYSTEM_PROMPT,
         generation_config=_GENERATION_CONFIG,
     )
 
     try:
-        response = model.generate_content(prompt)
+        response = _model.generate_content(prompt)
         raw_text = response.text.strip()
         result = _parse_response(raw_text)
         return _apply_safety_filter(result)
 
     except Exception as exc:
         logger.error("Gemini call failed: %s", exc)
-        # Return a safe fallback — never surface raw errors to users.
         return AIResult(
             explanation="I'm unable to provide a response right now. Please try again shortly.",
             action_items=["Please verify with your local election authority for guidance."],
@@ -313,32 +283,20 @@ def call_gemini(prompt: str) -> AIResult:
 # ── Response parsing ───────────────────────────────────────────────────────────
 
 def _parse_response(raw: str) -> AIResult:
-    """
-    Parse Gemini's structured output into an AIResult.
-
-    Expects the OUTPUT FORMAT defined in each prompt template:
-      EXPLANATION: ...
-      ACTIONS: - item ...
-      NEXT ACTION: ...
-
-    Falls back gracefully if the model doesn't follow the format exactly.
-    """
+    """Parse Gemini's structured output into an AIResult."""
     explanation = _extract_section(raw, "EXPLANATION")
     actions_block = _extract_section(raw, "ACTIONS")
     next_action = _extract_section(raw, "NEXT ACTION")
 
-    # Parse bullet lines from the ACTIONS block.
     action_items = [
         line.lstrip("-• ").strip()
         for line in actions_block.splitlines()
         if line.strip().startswith(("-", "•"))
     ]
 
-    # Append next action as the final item if present.
     if next_action:
         action_items.append(f"→ {next_action}")
 
-    # If parsing produced nothing, use the full response as explanation.
     if not explanation:
         explanation = raw
 
@@ -354,7 +312,6 @@ def _extract_section(text: str, section_name: str) -> str:
 
 # ── Safety post-processing ─────────────────────────────────────────────────────
 
-# Phrases that must never appear in a response to any user.
 _BANNED_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bbest (party|candidate|choice|option)\b", re.IGNORECASE),
     re.compile(r"\bvote for\b", re.IGNORECASE),
@@ -363,32 +320,20 @@ _BANNED_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bstrongest (party|candidate)\b", re.IGNORECASE),
 ]
 
-_PARTY_DISCLAIMER = (
-    "⚠️ This information is provided for awareness only and does not "
-    "recommend or endorse any candidate or party."
-)
-
 _VERIFICATION_NOTE = (
     "Please verify region-specific details with your local election authority."
 )
 
 
 def _apply_safety_filter(result: AIResult) -> AIResult:
-    """
-    Post-process the AI result to enforce neutrality constraints from gemini.md.
-
-    Rule-based — not another AI call. Runs on every response regardless
-    of intent, as a final safety net before the result leaves this module.
-    """
+    """Post-process the AI result to enforce neutrality constraints from gemini.md."""
     cleaned_explanation = result.explanation
     for pattern in _BANNED_PATTERNS:
         cleaned_explanation = pattern.sub("[removed]", cleaned_explanation)
 
-    # Flag if the response was altered — useful for monitoring.
     if cleaned_explanation != result.explanation:
         logger.warning("Safety filter removed biased content from AI response.")
 
-    # Attach verification note if not already in action items.
     action_items = list(result.action_items)
     if not any(_VERIFICATION_NOTE in item for item in action_items):
         action_items.append(_VERIFICATION_NOTE)
@@ -400,7 +345,7 @@ def _apply_safety_filter(result: AIResult) -> AIResult:
     )
 
 
-# ── Public API ─────────────────────────────────────────────────────────
+# ── Public API ─────────────────────────────────────────────────────────────────
 
 def explain_step(
     step_name: str,
@@ -439,37 +384,56 @@ def compare_parties(party_data: list[dict], region: str, language: str) -> AIRes
     prompt = _prompt_compare_parties(party_data, region, language)
     return call_gemini(prompt)
 
-import vertexai
-from vertexai.generative_models import GenerativeModel
 
-# Initialize ONCE
-vertexai.init(project="votai-494905", location="us-central1")
+# ── Chat Assist ────────────────────────────────────────────────────────────────
 
-model = GenerativeModel("gemini-1.0-pro")  # safe + widely available
+def _build_party_context(parties: list) -> str:
+    """Format party list into a plain-text block for the AI prompt."""
+    blocks = []
+    for p in parties:
+        blocks.append(
+            f"Party: {p.get('name')}\n"
+            f"Focus Areas: {', '.join(p.get('focus_areas', []))}\n"
+            f"Policies: {', '.join(p.get('key_policies', []))}"
+        )
+    return "\n---\n".join(blocks)
 
 
-def chat_assist(message: str, region_id: str):
+def _build_fallback_response(parties: list) -> dict:
+    """Return a safe, AI-free response listing party focus areas."""
+    lines = []
+    for p in parties[:3]:
+        name = p.get("name", "Unknown Party")
+        focus = ", ".join(p.get("focus_areas", []))
+        lines.append(f"• {name}: {focus}")
+    summary = "\n".join(lines) if lines else "No party details available."
+    return {
+        "response": (
+            "AI currently unavailable. Showing basic party insights.\n\n" + summary
+        ),
+        "disclaimer": "Neutral civic info only.",
+    }
+
+
+def chat_assist(message: str, region_id: str) -> dict:
+    """
+    Answer a user civic query using Firestore party data as context.
+    Always returns {response, disclaimer}. Never raises.
+    Falls back gracefully if the AI model is unavailable.
+    """
     from backend.services.parties import get_parties
 
     parties = get_parties(region_id)
 
     if not parties:
         return {
-            "response": "No party data available.",
-            "disclaimer": "Neutral civic info only."
+            "response": "No party data available for your region.",
+            "disclaimer": "Neutral civic info only.",
         }
 
-    party_context = ""
-    for p in parties:
-        party_context += f"""
-Party: {p.get('name')}
-Focus Areas: {', '.join(p.get('focus_areas', []))}
-Policies: {', '.join(p.get('key_policies', []))}
----
-"""
+    party_context = _build_party_context(parties)
 
-    prompt = f"""
-You are a neutral civic assistant.
+    prompt = f"""You are a neutral civic assistant.
 
 User query:
 {message}
@@ -482,18 +446,23 @@ Rules:
 - Do NOT rank parties
 - Only compare based on policies
 - Keep answer short and structured
+- End with: "This is neutral information for awareness only."
 """
 
-    try:
-        response = model.generate_content(prompt)
+    print("DEBUG: Calling AI model for chat_assist")
+    print("DEBUG: Region:", region_id)
 
+    try:
+        ai_response = model.generate_content(
+            prompt,
+            generation_config=_GENERATION_CONFIG,
+        )
+        print("DEBUG: AI success")
         return {
-            "response": response.text,
-            "disclaimer": "This information is neutral and for awareness only."
+            "response": ai_response.text.strip(),
+            "disclaimer": "This information is neutral and for awareness only.",
         }
 
     except Exception as e:
-        return {
-            "response": f"AI error: {str(e)}",
-            "disclaimer": None
-        }
+        print("ERROR in chat_assist AI call:", str(e))
+        return _build_fallback_response(parties)
