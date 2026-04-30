@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from backend.models.user import UserProfile
 from backend.models.response import VotaiResponse
-from backend.services import flow_engine, user_service, scenario_handler
+from backend.services import flow_engine, user_service, scenario_handler, ai_service
 from backend.services.flow_engine import get_step, get_next_step, calculate_readiness
 
 logger = logging.getLogger(__name__)
@@ -46,12 +46,12 @@ class OnboardRequest(BaseModel):
 async def onboard_user(req: OnboardRequest):
     """
     Create a user profile and initialise progress at Step 1.
-
-    Idempotent: calling this again for the same user_id overwrites
-    the profile but resets progress — intended for re-onboarding.
     """
-    profile = UserProfile(**req.model_dump())
-    user_service.create_user(profile)
+    try:
+        profile = UserProfile(**req.model_dump())
+        user_service.create_user(profile)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Initialise progress — get_progress creates and saves the default if absent.
     progress = user_service.get_progress(req.user_id)
@@ -71,6 +71,7 @@ async def onboard_user(req: OnboardRequest):
 @router.get("/{user_id}/step", response_model=VotaiResponse)
 async def get_current_step(
     user_id: str,
+    region: Optional[str] = Query(default="unknown", description="User's region code (e.g. IN-MH)."),
     message: Optional[str] = Query(default=None, description="Optional user question about the current step."),
 ):
     """
@@ -79,16 +80,13 @@ async def get_current_step(
     If a message is provided:
       1. Check scenario_handler first.
       2. If a scenario is matched → return its resolution immediately.
-      3. Otherwise → return step info (Phase 2 will add AI explanation here).
-
-    This structure ensures scenario-first handling is in place
-    before AI is integrated in Phase 2.
+      3. Otherwise → call ai_service.explain_step() (single Gemini call).
     """
     progress = user_service.get_progress(user_id)
     current_step = get_step(progress.current_step)
     next_step = get_next_step(progress.current_step)
 
-    # ── Scenario-first check (runs before any future AI call) ─────────────────
+    # ── Scenario-first check (always runs before AI) ───────────────────────────
     if message:
         resolution = scenario_handler.handle(message)
         if resolution:
@@ -102,7 +100,25 @@ async def get_current_step(
                 explanation=resolution.title,
                 action_items=resolution.steps + [resolution.fallback_note],
             )
-    # ── Phase 2: AI explanation call will be inserted here ────────────────────
+
+        # ── UPDATED: fetch user_profile for language, then call AI ─────────────
+        user_profile = user_service.get_user(user_id)          # ADDED
+        language = user_profile.language if user_profile else "en"
+
+        result = ai_service.explain_step(                       # UPDATED (public API)
+            step_name=current_step.step_name,
+            step_description=current_step.description,
+            user_message=message,
+            region=region,
+            language=language,
+        )
+        return VotaiResponse(
+            current_step=current_step,
+            next_step=next_step,
+            explanation=result.explanation,
+            action_items=result.action_items,
+            disclaimer=result.disclaimer,
+        )
 
     return VotaiResponse(
         current_step=current_step,

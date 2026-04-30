@@ -38,7 +38,12 @@ def create_user(profile: UserProfile) -> None:
 
     Called once at onboarding. The document ID equals the user_id,
     making profile lookups an O(1) direct fetch.
+    Raises ValueError if user is under 18.
     """
+    if profile.age < 18:
+        logger.warning("Age eligibility failure (user_id=%s, age=%d)", profile.user_id, profile.age)
+        raise ValueError("User must be at least 18 years old to vote.")
+
     data = profile.model_dump()
     data["created_at"] = _utc_now()
     set_document(_USERS_COLLECTION, profile.user_id, data)
