@@ -1,0 +1,27 @@
+# ── FastAPI Backend ─────────────────────────────
+fastapi
+uvicorn[standard]
+
+# ── Data Validation ─────────────────────────────
+pydantic
+typing-extensions
+
+# ── Environment Management ──────────────────────
+python-dotenv
+
+# ── Google Cloud (Core) ─────────────────────────
+google-cloud-firestore
+google-cloud-aiplatform
+
+# ── HTTP / Async Utilities ──────────────────────
+httpx
+
+# ── JSON Performance (optional but good) ────────
+orjson
+
+# ── Logging / Utilities ─────────────────────────
+python-multipart
+
+# ── Development (optional but useful) ───────────
+pytest
+pytest-asyncio
