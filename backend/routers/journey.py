@@ -65,14 +65,15 @@ async def onboard_user(req: OnboardRequest):
         current_step=current_step,
         next_step=next_step,
         action_items=["Complete Step 1 to begin your journey."],
+        message=f"Welcome! You are {current_step.percentage}% ready."
     )
 
 
 @router.get("/{user_id}/step", response_model=VotaiResponse)
 async def get_current_step(
     user_id: str,
-    region: Optional[str] = Query(default="unknown", description="User's region code (e.g. IN-MH)."),
-    message: Optional[str] = Query(default=None, description="Optional user question about the current step."),
+    region_id: Optional[str] = Query(default="IN-MH", alias="region", description="User's region code."),
+    message: Optional[str] = Query(default=None, description="Optional user question."),
 ):
     """
     Return the user's current step and relevant context.
@@ -102,14 +103,20 @@ async def get_current_step(
             )
 
         # ── UPDATED: fetch user_profile for language, then call AI ─────────────
-        user_profile = user_service.get_user(user_id)          # ADDED
+        user_profile = user_service.get_user(user_id)
         language = user_profile.language if user_profile else "en"
+        is_first_time = user_profile.first_time_voter if user_profile else True
 
-        result = ai_service.explain_step(                       # UPDATED (public API)
+        # Append guidance context to message
+        enhanced_message = message
+        if is_first_time:
+            enhanced_message += " (Note: I am a first-time voter, please provide beginner guidance)"
+
+        result = ai_service.explain_step(
             step_name=current_step.step_name,
             step_description=current_step.description,
-            user_message=message,
-            region=region,
+            user_message=enhanced_message,
+            region=region_id,
             language=language,
         )
         return VotaiResponse(
@@ -118,6 +125,15 @@ async def get_current_step(
             explanation=result.explanation,
             action_items=result.action_items,
             disclaimer=result.disclaimer,
+        )
+
+    # Check for completion state
+    if progress.current_step > 5:
+        return VotaiResponse(
+            current_step=current_step,
+            completed=True,
+            message="🎉 You are ready to vote",
+            action_items=["Visit polling booth on election day"]
         )
 
     return VotaiResponse(
@@ -144,6 +160,14 @@ async def advance_step(user_id: str):
         "Step advanced (user_id=%s, current=%d, readiness=%d%%)",
         user_id, updated_progress.current_step, readiness,
     )
+
+    if updated_progress.current_step > 5:
+        return VotaiResponse(
+            current_step=current_step,
+            completed=True,
+            message="🎉 You are ready to vote",
+            action_items=["Visit polling booth on election day"]
+        )
 
     return VotaiResponse(
         current_step=current_step,

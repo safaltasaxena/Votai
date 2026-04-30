@@ -431,3 +431,65 @@ def compare_parties(party_data: list[dict], region: str, language: str) -> AIRes
     """Public wrapper for neutral party presentation. Entry point for parties router."""
     prompt = _prompt_compare_parties(party_data, region, language)
     return call_gemini(prompt)
+
+
+def chat_assist(message: str, region_id: str, language: str = "en") -> dict:
+    """
+    Controlled AI assistant for neutral party comparison.
+    Maps user message to policy areas and returns structured matching.
+    """
+    # 1. Fetch parties for the region
+    from backend.services.data_service import get_parties
+    parties = get_parties(region_id) or []
+    
+    # 2. Build structured prompt
+    prompt = f"""
+    ROLE: Neutral Election Assistant
+    TASK: Map user priorities to party policies.
+    
+    USER MESSAGE: "{message}"
+    REGION: {region_id}
+    LANGUAGE: {language}
+    
+    PARTIES DATA: {parties}
+    
+    RULES:
+    - DO NOT recommend a party.
+    - DO NOT rank parties.
+    - DO NOT use words like "best", "better", "recommended".
+    - ONLY match user interests to relevant policies/focus areas from the data.
+    
+    RETURN JSON:
+    {{
+        "intent": "identified user interest",
+        "relevant_areas": ["area1", "area2"],
+        "parties": [
+            {{
+                "name": "Party Name",
+                "matching_policies": ["policy1", "policy2"]
+            }}
+        ],
+        "disclaimer": "This information is for awareness only and does not recommend any party."
+    }}
+    """
+    
+    try:
+        response = call_gemini(prompt)
+        # Note: In a production environment, call_gemini would return AIResult.
+        # Here we extract the raw text and parse JSON for the chat endpoint.
+        import json
+        import re
+        
+        # Clean potential markdown
+        content = response.explanation if hasattr(response, 'explanation') else str(response)
+        cleaned = re.sub(r'```json|```', '', content).strip()
+        return json.loads(cleaned)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("AI Chat failed: %s", str(e))
+        return {
+            "intent": "unknown",
+            "relevant_areas": [],
+            "parties": [],
+            "disclaimer": "AI assistant is currently unavailable. Please check party details manually."
+        }

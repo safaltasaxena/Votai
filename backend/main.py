@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
-from backend.routers import journey, elections, parties
+from backend.routers import journey, elections, parties, ai
 
 # ── App Initialization ───────────────────────────────────────────────────────
 
@@ -29,6 +29,7 @@ app.add_middleware(
 app.include_router(journey.router)
 app.include_router(elections.router)
 app.include_router(parties.router)
+app.include_router(ai.router)
 
 # ── Health Check ────────────────────────────────────────────────────────────
 

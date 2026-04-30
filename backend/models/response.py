@@ -21,6 +21,9 @@ class StepInfo(BaseModel):
     step_number: int = Field(..., ge=1, le=5)
     step_name: str = Field(..., description="Human-readable step label.")
     description: str = Field(..., description="What this step is about.")
+    percentage: int = Field(default=0, ge=0, le=100)
+    next_action: Optional[str] = None
+    simulation_steps: Optional[list[dict]] = None
 
 
 class VotaiResponse(BaseModel):
@@ -62,3 +65,5 @@ class VotaiResponse(BaseModel):
         default=None,
         description="Human-readable error message when success is False."
     )
+    completed: bool = False
+    message: Optional[str] = None

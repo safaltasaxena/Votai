@@ -25,28 +25,44 @@ from backend.models.progress import StepState
 JOURNEY_STEPS: dict[int, StepInfo] = {
     1: StepInfo(
         step_number=1,
-        step_name="Eligibility",
-        description="Check whether you meet the requirements to vote in your region.",
+        step_name="Eligibility Check",
+        description="Confirm you meet the legal requirements to vote in your region.",
+        percentage=20,
+        next_action="Complete your eligibility checklist."
     ),
     2: StepInfo(
         step_number=2,
-        step_name="Registration",
+        step_name="Voter Registration",
         description="Register as a voter — documents needed, deadlines, and how to apply.",
+        percentage=40,
+        next_action="Submit your registration form."
     ),
     3: StepInfo(
         step_number=3,
-        step_name="Verification",
-        description="Confirm your name appears on the voter list and collect your Voter ID.",
+        step_name="List Verification",
+        description="Confirm your name appears correctly in the voter list and collect your Voter ID.",
+        percentage=60,
+        next_action="Check the electoral roll for your name."
     ),
     4: StepInfo(
         step_number=4,
-        step_name="Understanding the Election",
+        step_name="Candidate Understanding",
         description="Learn about the election, parties, and candidates in a neutral, factual way.",
+        percentage=80,
+        next_action="Review party manifestos and past work."
     ),
     5: StepInfo(
         step_number=5,
-        step_name="Voting Day",
+        step_name="Voting Day Simulation",
         description="Walk through what to expect on election day — from arrival to casting your vote.",
+        percentage=100,
+        next_action="Prepare for election day.",
+        simulation_steps=[
+            {"title": "Arrival", "desc": "Go to polling booth"},
+            {"title": "Verification", "desc": "Show ID"},
+            {"title": "Voting", "desc": "Use EVM"},
+            {"title": "Exit", "desc": "Ink mark applied"}
+        ]
     ),
 }
 

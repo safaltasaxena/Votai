@@ -56,5 +56,13 @@ export const api = {
   getParties: async (regionId) => {
     const response = await fetch(`${API_BASE}/parties/${regionId}`);
     return handleResponse(response);
+  },
+
+  compareParties: async (regionId, language = 'en') => {
+    // This calls the specific AI comparison endpoint (if backend supports)
+    // Or we can simulate it if the backend doesn't have a dedicated route yet.
+    // For this task, we assume the backend has /parties/{region_id}/compare
+    const response = await fetch(`${API_BASE}/parties/${regionId}/compare?language=${language}`);
+    return handleResponse(response);
   }
 };

@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import ChatAssist from '../components/ChatAssist';
 
 const Journey = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stepData, setStepData] = useState(null);
+  const [extraData, setExtraData] = useState(null); // Elections/Parties data
   const [showToast, setShowToast] = useState(false);
   
   const userId = localStorage.getItem('votai_user_id');
   const userAge = parseInt(localStorage.getItem('votai_user_age') || '0');
-  const regionId = localStorage.getItem('votai_region_id') || 'IN-MH'; // Fallback added
+  const regionId = localStorage.getItem('votai_region_id') || 'IN-MH';
   const regionName = localStorage.getItem('votai_region_name') || 'Default';
 
   const isUnderage = userAge < 18;
@@ -30,6 +32,19 @@ const Journey = () => {
       const data = await api.getCurrentStep(userId, regionId, message);
       setStepData(data);
       setError(null);
+
+      // Fetch context-specific data based on step
+      const stepNum = data.current_step.step_number;
+      if (stepNum === 2) {
+        const election = await api.getTimeline(regionId);
+        setExtraData(election.timeline);
+      } else if (stepNum === 4) {
+        const parties = await api.getParties(regionId);
+        setExtraData(parties);
+      } else {
+        setExtraData(null);
+      }
+
     } catch (err) {
       console.error("Failed to fetch step:", err);
       setError(err.message || "Could not load your journey. Please try again.");
@@ -44,7 +59,6 @@ const Journey = () => {
       await api.advanceStep(userId);
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
-      
       await fetchStep();
     } catch (err) {
       console.error("Advancement failed:", err);
@@ -63,9 +77,79 @@ const Journey = () => {
   );
   if (!stepData) return null;
 
-  const { current_step, explanation, action_items } = stepData;
+  const { current_step, explanation, action_items, completed, message: completionMessage } = stepData;
   const readiness = current_step.percentage || 0;
-  const isFinished = current_step.step_number > 5;
+  const isFinished = completed || current_step.step_number > 5;
+
+  // ── Step-Specific UI Renderers ─────────────────────────────────────────────
+
+  const renderStepContent = () => {
+    const sn = current_step.step_number;
+
+    if (sn === 1) return (
+      <div className="checklist">
+        <label className="checkbox-group" style={{ marginBottom: '0.5rem' }}>
+          <input type="checkbox" checked={userAge >= 18} readOnly />
+          <span>I am 18 years or older</span>
+        </label>
+        <label className="checkbox-group">
+          <input type="checkbox" checked={true} readOnly />
+          <span>I am a citizen of {localStorage.getItem('votai_country') || 'this country'}</span>
+        </label>
+      </div>
+    );
+
+    if (sn === 2 && extraData) return (
+      <div className="extra-info">
+        <p><strong>Deadline:</strong> <span style={{ color: '#eab308' }}>{extraData.registration_deadline}</span></p>
+        <p style={{ marginTop: '0.5rem' }}>
+          <a href={extraData.official_portal} target="_blank" className="btn-secondary" style={{ display: 'inline-block', textDecoration: 'none' }}>
+            Open Official Portal ↗
+          </a>
+        </p>
+      </div>
+    );
+
+    if (sn === 4 && extraData) return (
+      <div className="party-preview">
+        <div className="party-grid">
+          {(extraData.parties || []).slice(0, 3).map(p => (
+            <div key={p.party_id} className="party-mini-card">
+              <h4>{p.name}</h4>
+              <div className="tag-container">
+                {p.focus_areas.slice(0, 2).map(tag => <span key={tag} className="tag">{tag}</span>)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => navigate('/parties')} className="expand-link" style={{ marginTop: '1rem' }}>
+          View all parties & full policies
+        </button>
+      </div>
+    );
+
+    if (sn === 5) return (
+      <div className="simulation-container">
+        {(current_step.simulation_steps || [
+          { title: "Arrival", desc: "Go to polling booth" },
+          { title: "Verification", desc: "Show ID" },
+          { title: "Voting", desc: "Use EVM" },
+          { title: "Exit", desc: "Ink mark applied" }
+        ]).map((s, i) => (
+          <div key={i} className={`simulation-step ${i === 0 ? 'active' : ''}`}>
+            <div className="simulation-dot"></div>
+            <div className="simulation-line"></div>
+            <div className="simulation-content">
+              <h4>{s.title}</h4>
+              <p>{s.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+
+    return null;
+  };
 
   return (
     <div className="page">
@@ -75,97 +159,85 @@ const Journey = () => {
         <div className="readiness-banner">
           <div className="readiness-header">
             <span>{regionName} Election Journey</span>
-            <span className="readiness-text">You are {readiness}% ready</span>
+            <span className="readiness-text">{readiness}% Ready</span>
           </div>
           <div className="progress-bar-container">
-            <div 
-              className="progress-bar-fill" 
-              style={{ width: `${readiness}%` }}
-            ></div>
+            <div className="progress-bar-fill" style={{ width: `${readiness}%` }}></div>
           </div>
         </div>
 
         {isFinished ? (
           <div className="step-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-            <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</h1>
-            <h1>You are ready to vote!</h1>
-            <p style={{ color: '#94a3b8', fontSize: '1.1rem', marginBottom: '2rem' }}>
-              You've completed all the steps. You're now an informed and registered voter.
+            <h1 style={{ fontSize: '3rem' }}>🎉</h1>
+            <h1>{completionMessage || "You are ready to vote!"}</h1>
+            <p style={{ color: '#94a3b8', marginTop: '1rem' }}>
+              You have completed all guidance steps. You are now an informed voter.
             </p>
-            <button onClick={() => navigate('/ready')} className="btn-primary">
+            <button onClick={() => navigate('/ready')} className="btn-primary" style={{ marginTop: '2rem' }}>
               View Final Checklist
             </button>
           </div>
         ) : (
           <>
-            {/* Alerts */}
-            <div className="alert-deadline">
-              <span>{isUnderage ? "👶" : "ℹ️"}</span>
-              <span>
-                <strong>Status:</strong> {isUnderage 
-                  ? "You are not eligible to vote yet, but you can explore the process." 
-                  : `Current Goal: ${current_step.step_name}`}
-              </span>
-            </div>
+            {isUnderage && (
+              <div className="alert-deadline">
+                <span>👶</span>
+                <span><strong>Note:</strong> You are not eligible to vote yet, but you can explore.</span>
+              </div>
+            )}
 
-            {/* Step Card */}
             <div className="step-card">
               <span className="step-badge">Step {current_step.step_number} of 5</span>
               <h1>{current_step.step_name}</h1>
-              <p style={{ color: '#94a3b8' }}>{current_step.description}</p>
+              
+              <div style={{ margin: '1.5rem 0' }}>
+                <h4 style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>What this means</h4>
+                <p style={{ color: '#cbd5e1', marginTop: '0.5rem', lineHeight: '1.6' }}>{explanation || current_step.description}</p>
+              </div>
 
-              {explanation && (
-                <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', borderLeft: '3px solid var(--primary-color)' }}>
-                  <p>{explanation}</p>
+              {renderStepContent()}
+
+              <div style={{ marginTop: '2rem' }}>
+                <h4 style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>What you should do</h4>
+                <ul className="action-list">
+                  {(action_items || []).map((action, index) => (
+                    <li key={index} className="action-item">
+                      <span className="action-bullet">→</span>
+                      <span>{action}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {action_items && action_items.length > 0 && (
+                <div className="next-action-footer">
+                  <strong>👉 Next Action</strong>
+                  <span>{action_items[0]}</span>
                 </div>
               )}
 
-              <ul className="action-list">
-                {(action_items || []).map((action, index) => (
-                  <li key={index} className="action-item">
-                    <span className="action-bullet">→</span>
-                    <span>{action}</span>
-                  </li>
-                ))}
-              </ul>
-
               <button 
                 onClick={handleComplete} 
-                className="btn-primary"
+                className="btn-primary" 
                 disabled={loading || isUnderage}
+                style={{ marginTop: '2rem' }}
               >
-                {loading ? "Processing..." : isUnderage ? "Action Disabled (Under 18)" : "Mark Done & Continue"}
+                {loading ? "Processing..." : isUnderage ? "Action Disabled (Minor)" : "Mark Done & Continue"}
               </button>
+            </div>
+
+            <div className="quick-actions">
+              <button className="btn-secondary" onClick={() => fetchStep("I moved recently")}>I moved recently</button>
+              <button className="btn-secondary" onClick={() => fetchStep("I missed deadline")}>I missed deadline</button>
+              <button className="btn-secondary" onClick={() => fetchStep("My name isn't on list")}>Name missing</button>
             </div>
           </>
         )}
 
-        {/* Quick Actions */}
-        <div style={{ marginBottom: '1rem', fontSize: '0.9rem', color: '#64748b' }}>
-          Need specific help?
-        </div>
-        <div className="quick-actions">
-          <button className="btn-secondary" onClick={() => fetchStep("I moved recently")}>
-            I moved recently
-          </button>
-          <button className="btn-secondary" onClick={() => fetchStep("I missed deadline")}>
-            I missed deadline
-          </button>
-          <button className="btn-secondary" onClick={() => fetchStep("My name isn't on list")}>
-            My name isn't on list
-          </button>
-          <button className="btn-secondary" onClick={() => navigate('/timeline')}>
-            View Full Timeline
-          </button>
-        </div>
+        {showToast && <div className="feedback-toast">✔ Step completed</div>}
 
-        {/* Micro Feedback Toast */}
-        {showToast && (
-          <div className="feedback-toast">
-            ✔ Step completed
-          </div>
-        )}
-
+        {/* Chat Assistant */}
+        <ChatAssist regionId={regionId} />
       </div>
     </div>
   );
