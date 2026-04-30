@@ -75,3 +75,7 @@ def update_document(collection: str, doc_id: str, data: dict) -> None:
     would risk losing fields written by another path.
     """
     get_db().collection(collection).document(doc_id).set(data, merge=True)
+
+def get_collection(collection_name: str):
+    db = get_db()
+    return [doc.to_dict() for doc in db.collection(collection_name).stream()]

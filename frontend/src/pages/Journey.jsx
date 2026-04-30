@@ -146,13 +146,29 @@ const Journey = () => {
 
           <div
             className="service-card"
-            onClick={() => window.open("https://electoralsearch.eci.gov.in/uesfmempmlkypo", "_blank")}
+            style={{
+              cursor: "pointer",
+              padding: "12px",
+              borderRadius: "10px",
+              background: "#1e293b",
+              marginTop: "10px",
+              border: "1px solid #334155"
+            }}
+            onClick={() => window.open("https://electoralsearch.eci.gov.in/", "_blank")}
           >
             🔍 Search your name in voter list
           </div>
 
           <div
             className="service-card"
+            style={{
+              cursor: "pointer",
+              padding: "12px",
+              borderRadius: "10px",
+              background: "#1e293b",
+              marginTop: "10px",
+              border: "1px solid #334155"
+            }}
             onClick={() => window.open("https://voters.eci.gov.in/", "_blank")}
           >
             📝 Register as new voter (Form 6)
@@ -160,6 +176,14 @@ const Journey = () => {
 
           <div
             className="service-card"
+            style={{
+              cursor: "pointer",
+              padding: "12px",
+              borderRadius: "10px",
+              background: "#1e293b",
+              marginTop: "10px",
+              border: "1px solid #334155"
+            }}
             onClick={() => window.open("https://voters.eci.gov.in/", "_blank")}
           >
             ✏️ Correct your details (Form 8)

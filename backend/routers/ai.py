@@ -1,27 +1,13 @@
-"""
-backend/routers/ai.py — AI-specific endpoints like chat assist.
-"""
-
-from typing import Optional
-from fastapi import APIRouter, Body
-from pydantic import BaseModel
+from fastapi import APIRouter
 from backend.services import ai_service
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
-class ChatRequest(BaseModel):
-    message: str
-    region_id: str
-    language: str = "en"
-
 @router.post("/chat")
-async def chat_with_assistant(req: ChatRequest):
-    """
-    Controlled AI assistant for neutral party comparison and election help.
-    """
-    result = ai_service.chat_assist(
-        message=req.message,
-        region_id=req.region_id,
-        language=req.language
+async def chat(request: dict):
+    print("DEBUG: Chat request received:", request)
+
+    return ai_service.chat_assist(
+        message=request.get("message"),
+        region_id=request.get("region_id")
     )
-    return result

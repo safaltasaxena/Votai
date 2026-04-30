@@ -28,7 +28,7 @@ LOCATION = "us-central1"
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-model = GenerativeModel("gemini-1.5-flash")
+model = GenerativeModel("gemini-1.0-pro")
 
 import logging
 import re
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # Uses PROJECT_ID and REGION from config (loaded from .env).
 vertexai.init(project=settings.project_id, location=settings.region)
 
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-1.0-pro"
 
 # Conservative generation config — keeps responses factual and concise.
 _GENERATION_CONFIG = GenerationConfig(
@@ -400,9 +400,7 @@ def _apply_safety_filter(result: AIResult) -> AIResult:
     )
 
 
-# ── Public API (ADDED) ─────────────────────────────────────────────────────────
-# Routers call these functions — never the private _prompt_* functions directly.
-# Each wrapper builds the prompt then executes the single Gemini call.
+# ── Public API ─────────────────────────────────────────────────────────
 
 def explain_step(
     step_name: str,
@@ -441,76 +439,61 @@ def compare_parties(party_data: list[dict], region: str, language: str) -> AIRes
     prompt = _prompt_compare_parties(party_data, region, language)
     return call_gemini(prompt)
 
+import vertexai
+from vertexai.generative_models import GenerativeModel
 
-def chat_assist(message: str, region_id: str, language: str = "en") -> dict:
-    """
-    Vertex AI powered assistant with Firestore grounding.
-    Returns natural language (NOT JSON) for frontend rendering.
-    """
+# Initialize ONCE
+vertexai.init(project="votai-494905", location="us-central1")
 
-    from backend.services.data_service import get_parties
+model = GenerativeModel("gemini-1.0-pro")  # safe + widely available
 
-    parties = get_parties(region_id) or []
+
+def chat_assist(message: str, region_id: str):
+    from backend.services.parties import get_parties
+
+    parties = get_parties(region_id)
 
     if not parties:
         return {
-            "focus": "unknown",
-            "response": "No party data available for this region.",
-            "disclaimer": "This information is provided for awareness only."
+            "response": "No party data available.",
+            "disclaimer": "Neutral civic info only."
         }
 
-    # 🔹 Build structured context (IMPORTANT: keeps AI grounded)
     party_context = ""
     for p in parties:
         party_context += f"""
-            Party: {p.get('name')}
-            Focus Areas: {', '.join(p.get('focus_areas', []))}
-            Policies: {', '.join(p.get('key_policies', []))}
-            Past Work: {', '.join(p.get('past_work', []))}
-        ---
-        """
+Party: {p.get('name')}
+Focus Areas: {', '.join(p.get('focus_areas', []))}
+Policies: {', '.join(p.get('key_policies', []))}
+---
+"""
 
-    # 🔹 Controlled prompt
     prompt = f"""
-        You are a neutral civic assistant.
+You are a neutral civic assistant.
 
-        User query:
-        "{message}"
+User query:
+{message}
 
-        Region:
-        {region_id}
+Party data:
+{party_context}
 
-        Available party data:
-        {party_context}
-
-        Instructions:
-        - Do NOT recommend any party
-        - Do NOT rank parties
-        - Only explain based on policies and focus areas
-        - Be factual and neutral
-        - Use bullet points where useful
-        - Keep it short and structured
-
-        End with:
-        "This information is provided for awareness only and does not recommend or endorse any party."
-        """
+Rules:
+- Do NOT recommend any party
+- Do NOT rank parties
+- Only compare based on policies
+- Keep answer short and structured
+"""
 
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=_GENERATION_CONFIG
-        )
+        response = model.generate_content(prompt)
 
         return {
-            "focus": "ai",
-            "response": response.text.strip(),
-            "disclaimer": "This information is provided for awareness only and does not recommend or endorse any party."
+            "response": response.text,
+            "disclaimer": "This information is neutral and for awareness only."
         }
 
     except Exception as e:
-        logger.error("AI Chat failed: %s", str(e))
         return {
-            "focus": "error",
-            "response": "AI assistant is currently unavailable. Please try again later.",
+            "response": f"AI error: {str(e)}",
             "disclaimer": None
         }

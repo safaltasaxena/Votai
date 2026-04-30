@@ -22,6 +22,7 @@ const ChatAssist = ({ regionId }) => {
         body: JSON.stringify({ message, region_id: regionId })
       });
       const data = await response.json();
+      console.log("DEBUG CHAT RESPONSE:", data);
 
       const aiMsg = { role: 'ai', data };
       setHistory(prev => [...prev, aiMsg]);
