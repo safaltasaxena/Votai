@@ -20,6 +20,15 @@ CALL STRATEGY (Phase 5 MVP):
   enough context to guide the model's behaviour without needing a
   separate classification call. Multi-call architecture is Phase 6.
 """
+import vertexai
+from vertexai.generative_models import GenerativeModel
+
+PROJECT_ID = "votai-494905"
+LOCATION = "us-central1"
+
+vertexai.init(project=PROJECT_ID, location=LOCATION)
+
+model = GenerativeModel("gemini-1.5-flash")
 
 import logging
 import re
@@ -435,61 +444,73 @@ def compare_parties(party_data: list[dict], region: str, language: str) -> AIRes
 
 def chat_assist(message: str, region_id: str, language: str = "en") -> dict:
     """
-    Controlled AI assistant for neutral party comparison.
-    Maps user message to policy areas and returns structured matching.
+    Vertex AI powered assistant with Firestore grounding.
+    Returns natural language (NOT JSON) for frontend rendering.
     """
-    # 1. Fetch parties for the region
+
     from backend.services.data_service import get_parties
+
     parties = get_parties(region_id) or []
-    
-    # 2. Build structured prompt
-    prompt = f"""
-    ROLE: Neutral Election Assistant
-    TASK: Map user priorities to party policies.
-    
-    USER MESSAGE: "{message}"
-    REGION: {region_id}
-    LANGUAGE: {language}
-    
-    PARTIES DATA: {parties}
-    
-    RULES:
-    - DO NOT recommend a party.
-    - DO NOT rank parties.
-    - DO NOT use words like "best", "better", "recommended".
-    - ONLY match user interests to relevant policies/focus areas from the data.
-    
-    RETURN JSON:
-    {{
-        "intent": "identified user interest",
-        "relevant_areas": ["area1", "area2"],
-        "parties": [
-            {{
-                "name": "Party Name",
-                "matching_policies": ["policy1", "policy2"]
-            }}
-        ],
-        "disclaimer": "This information is for awareness only and does not recommend any party."
-    }}
-    """
-    
-    try:
-        response = call_gemini(prompt)
-        # Note: In a production environment, call_gemini would return AIResult.
-        # Here we extract the raw text and parse JSON for the chat endpoint.
-        import json
-        import re
-        
-        # Clean potential markdown
-        content = response.explanation if hasattr(response, 'explanation') else str(response)
-        cleaned = re.sub(r'```json|```', '', content).strip()
-        return json.loads(cleaned)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("AI Chat failed: %s", str(e))
+
+    if not parties:
         return {
-            "intent": "unknown",
-            "relevant_areas": [],
-            "parties": [],
-            "disclaimer": "AI assistant is currently unavailable. Please check party details manually."
+            "focus": "unknown",
+            "response": "No party data available for this region.",
+            "disclaimer": "This information is provided for awareness only."
+        }
+
+    # 🔹 Build structured context (IMPORTANT: keeps AI grounded)
+    party_context = ""
+    for p in parties:
+        party_context += f"""
+            Party: {p.get('name')}
+            Focus Areas: {', '.join(p.get('focus_areas', []))}
+            Policies: {', '.join(p.get('key_policies', []))}
+            Past Work: {', '.join(p.get('past_work', []))}
+        ---
+        """
+
+    # 🔹 Controlled prompt
+    prompt = f"""
+        You are a neutral civic assistant.
+
+        User query:
+        "{message}"
+
+        Region:
+        {region_id}
+
+        Available party data:
+        {party_context}
+
+        Instructions:
+        - Do NOT recommend any party
+        - Do NOT rank parties
+        - Only explain based on policies and focus areas
+        - Be factual and neutral
+        - Use bullet points where useful
+        - Keep it short and structured
+
+        End with:
+        "This information is provided for awareness only and does not recommend or endorse any party."
+        """
+
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config=_GENERATION_CONFIG
+        )
+
+        return {
+            "focus": "ai",
+            "response": response.text.strip(),
+            "disclaimer": "This information is provided for awareness only and does not recommend or endorse any party."
+        }
+
+    except Exception as e:
+        logger.error("AI Chat failed: %s", str(e))
+        return {
+            "focus": "error",
+            "response": "AI assistant is currently unavailable. Please try again later.",
+            "disclaimer": None
         }

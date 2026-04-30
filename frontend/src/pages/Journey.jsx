@@ -10,7 +10,9 @@ const Journey = () => {
   const [stepData, setStepData] = useState(null);
   const [extraData, setExtraData] = useState(null); // Elections/Parties data
   const [showToast, setShowToast] = useState(false);
-  
+  const [simIndex, setSimIndex] = useState(0);
+
+
   const userId = localStorage.getItem('votai_user_id');
   const userAge = parseInt(localStorage.getItem('votai_user_age') || '0');
   const regionId = localStorage.getItem('votai_region_id') || 'IN-MH';
@@ -30,8 +32,15 @@ const Journey = () => {
     try {
       setLoading(true);
       const data = await api.getCurrentStep(userId, regionId, message);
+
+      if (!data || !data.current_step) {
+        console.error("DEBUG: Malformed step data:", data);
+        throw new Error("Invalid response from server: Missing step information.");
+      }
+
       setStepData(data);
       setError(null);
+      console.log("DEBUG: Journey API Response:", data);
 
       // Fetch context-specific data based on step
       const stepNum = data.current_step.step_number;
@@ -75,11 +84,20 @@ const Journey = () => {
       <button onClick={() => fetchStep()} className="btn-secondary">Retry Loading</button>
     </div>
   );
-  if (!stepData) return null;
+
+  if (!stepData) {
+    return (
+      <div className="page">
+        <p>⚠️ No step data received</p>
+      </div>
+    );
+  }
 
   const { current_step, explanation, action_items, completed, message: completionMessage } = stepData;
   const readiness = current_step.percentage || 0;
   const isFinished = completed || current_step.step_number > 5;
+
+  console.log("DEBUG: Journey Render - Step:", current_step.step_number, "Ready:", readiness, "Finished:", isFinished);
 
   // ── Step-Specific UI Renderers ─────────────────────────────────────────────
 
@@ -99,62 +117,137 @@ const Journey = () => {
       </div>
     );
 
-    if (sn === 2 && extraData) return (
-      <div className="extra-info">
-        <p><strong>Deadline:</strong> <span style={{ color: '#eab308' }}>{extraData.registration_deadline}</span></p>
-        <p style={{ marginTop: '0.5rem' }}>
-          <a href={extraData.official_portal} target="_blank" className="btn-secondary" style={{ display: 'inline-block', textDecoration: 'none' }}>
+    if (sn === 2) {
+      return (
+        <div style={{ marginTop: "1.5rem" }}>
+          <h3>📄 What you need</h3>
+
+          <ul>
+            <li>✔ Valid ID proof (Aadhaar / Passport)</li>
+            <li>✔ Address proof</li>
+            <li>✔ Passport size photo</li>
+          </ul>
+
+          <button
+            style={{ marginTop: "1rem" }}
+            onClick={() => window.open("https://voters.eci.gov.in/", "_blank")}
+          >
             Open Official Portal ↗
-          </a>
-        </p>
-      </div>
-    );
-
-    if (sn === 4 && extraData) return (
-      <div className="party-preview">
-        <div className="party-grid">
-          {(extraData.parties || []).slice(0, 3).map(p => (
-            <div key={p.party_id} className="party-mini-card">
-              <h4>{p.name}</h4>
-              <div className="tag-container">
-                {p.focus_areas.slice(0, 2).map(tag => <span key={tag} className="tag">{tag}</span>)}
-              </div>
-            </div>
-          ))}
+          </button>
         </div>
-        <button onClick={() => navigate('/parties')} className="expand-link" style={{ marginTop: '1rem' }}>
-          View all parties & full policies
-        </button>
-      </div>
-    );
+      );
+    }
 
-    if (sn === 5) return (
-      <div className="simulation-container">
-        {(current_step.simulation_steps || [
-          { title: "Arrival", desc: "Go to polling booth" },
-          { title: "Verification", desc: "Show ID" },
-          { title: "Voting", desc: "Use EVM" },
-          { title: "Exit", desc: "Ink mark applied" }
-        ]).map((s, i) => (
-          <div key={i} className={`simulation-step ${i === 0 ? 'active' : ''}`}>
-            <div className="simulation-dot"></div>
-            <div className="simulation-line"></div>
-            <div className="simulation-content">
-              <h4>{s.title}</h4>
-              <p>{s.desc}</p>
-            </div>
+    // 🔧 STEP 3 — Verification
+    if (sn === 3) {
+      return (
+        <div style={{ marginTop: "1.5rem" }}>
+          <h3>🔧 Quick Services</h3>
+
+          <div
+            className="service-card"
+            onClick={() => window.open("https://electoralsearch.eci.gov.in/uesfmempmlkypo", "_blank")}
+          >
+            🔍 Search your name in voter list
           </div>
-        ))}
-      </div>
-    );
+
+          <div
+            className="service-card"
+            onClick={() => window.open("https://voters.eci.gov.in/", "_blank")}
+          >
+            📝 Register as new voter (Form 6)
+          </div>
+
+          <div
+            className="service-card"
+            onClick={() => window.open("https://voters.eci.gov.in/", "_blank")}
+          >
+            ✏️ Correct your details (Form 8)
+          </div>
+        </div>
+      );
+    }
+
+    if (sn === 4) {
+      const parties = extraData?.parties || [];
+      return (
+        <div className="party-preview">
+          <div className="party-grid">
+            {parties.length > 0 ? parties.slice(0, 3).map(p => (
+              <div key={p.party_id} className="party-mini-card">
+                <h4>{p.name || "Unknown Party"}</h4>
+                <div className="tag-container">
+                  {(p.focus_areas || []).slice(0, 2).map(tag => <span key={tag} className="tag">{tag}</span>)}
+                </div>
+              </div>
+            )) : <p>No party data available for this region.</p>}
+          </div>
+          <button onClick={() => navigate('/parties')} className="expand-link" style={{ marginTop: '1rem' }}>
+            View all parties & full policies
+          </button>
+        </div>
+      );
+    }
+
+    if (sn === 5) {
+      const steps = current_step.simulation_steps || [
+        { title: "Arrival", desc: "Go to polling booth" },
+        { title: "Verification", desc: "Show ID" },
+        { title: "Voting", desc: "Use EVM" },
+        { title: "Exit", desc: "Ink mark applied" }
+      ];
+
+      return (
+        <div style={{ marginTop: "2rem" }}>
+          <h3>🗳️ Voting Simulation</h3>
+
+          <p>Step {simIndex + 1} of {steps.length}</p>
+
+          <h4>{steps[simIndex].title}</h4>
+          <p>{steps[simIndex].desc}</p>
+
+          <div style={{ marginTop: "1rem" }}>
+            {simIndex > 0 && (
+              <button onClick={() => setSimIndex(simIndex - 1)}>
+                ⬅ Back
+              </button>
+            )}
+
+            {simIndex < steps.length - 1 ? (
+              <button onClick={() => setSimIndex(simIndex + 1)}>
+                Next ➡
+              </button>
+            ) : (
+              <div style={{ color: "green", marginTop: "1rem" }}>
+                🎉 You have completed the voting simulation!
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     return null;
   };
 
+  // 🎉 COMPLETION SCREEN
+  if (completed) {
+    return (
+      <div className="page">
+        <h1>{completionMessage || "You are ready to vote!"}</h1>
+        <p>You are fully prepared for voting.</p>
+        <button onClick={() => navigate('/')} className="btn-secondary" style={{ marginTop: '2rem' }}>
+          Back to Home
+        </button>
+      </div>
+    );
+  }
+
+
   return (
     <div className="page">
       <div className="journey-container">
-        
+
         {/* Readiness Section */}
         <div className="readiness-banner">
           <div className="readiness-header">
@@ -189,7 +282,7 @@ const Journey = () => {
             <div className="step-card">
               <span className="step-badge">Step {current_step.step_number} of 5</span>
               <h1>{current_step.step_name}</h1>
-              
+
               <div style={{ margin: '1.5rem 0' }}>
                 <h4 style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>What this means</h4>
                 <p style={{ color: '#cbd5e1', marginTop: '0.5rem', lineHeight: '1.6' }}>{explanation || current_step.description}</p>
@@ -216,9 +309,9 @@ const Journey = () => {
                 </div>
               )}
 
-              <button 
-                onClick={handleComplete} 
-                className="btn-primary" 
+              <button
+                onClick={handleComplete}
+                className="btn-primary"
                 disabled={loading || isUnderage}
                 style={{ marginTop: '2rem' }}
               >

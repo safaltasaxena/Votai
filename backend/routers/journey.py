@@ -91,7 +91,7 @@ async def get_current_step(
         is_first_time = user_profile.first_time_voter if user_profile else True
 
         # ✅ FIX 3: Inject first-time voter context into AI
-        enhanced_message = message + (" (I am a first-time voter)" if is_first_time else "")
+        enhanced_message = message + ("User type: First-time voter → explain in beginner-friendly way, include step-by-step clarity\n\nUser type: Returning voter → skip basics, focus on verification and updates" if is_first_time else "")
 
         result = ai_service.explain_step(
             step_name=current_step.step_name,

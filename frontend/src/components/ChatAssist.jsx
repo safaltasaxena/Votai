@@ -16,13 +16,13 @@ const ChatAssist = ({ regionId }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/ai/chat', {
+      const response = await fetch('http://127.0.0.1:8000/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, region_id: regionId })
       });
       const data = await response.json();
-      
+
       const aiMsg = { role: 'ai', data };
       setHistory(prev => [...prev, aiMsg]);
     } catch (err) {
@@ -38,7 +38,6 @@ const ChatAssist = ({ regionId }) => {
       <button className="chat-toggle" onClick={() => setIsOpen(!isOpen)}>
         {isOpen ? '✕ Close Assistant' : '💬 Need Help? Ask AI'}
       </button>
-
       {isOpen && (
         <div className="chat-window">
           <div className="chat-header">
@@ -58,20 +57,16 @@ const ChatAssist = ({ regionId }) => {
                   <p style={{ color: '#ef4444' }}>{msg.error}</p>
                 ) : (
                   <div className="ai-response">
-                    <p><strong>Focus:</strong> {msg.data.intent}</p>
-                    <div className="party-comparison">
-                      {msg.data.parties.map((p, j) => (
-                        <div key={j} className="party-match">
-                          <strong>{p.name}</strong>
-                          <ul>
-                            {p.matching_policies.map((pol, k) => (
-                              <li key={k}>{pol}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="chat-disclaimer">{msg.data.disclaimer}</p>
+                    {msg.data && (
+                      <>
+                        <p style={{ whiteSpace: "pre-line" }}>
+                          {msg.data.response}
+                        </p>
+                        {msg.data.disclaimer && (
+                          <small className="chat-disclaimer">{msg.data.disclaimer}</small>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -80,9 +75,9 @@ const ChatAssist = ({ regionId }) => {
           </div>
 
           <form className="chat-input" onSubmit={handleSend}>
-            <input 
-              type="text" 
-              placeholder="Type your priority..." 
+            <input
+              type="text"
+              placeholder="Type your priority..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               disabled={loading}
