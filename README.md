@@ -224,3 +224,19 @@ Add your screenshots here:
 “We are not changing how elections work.
 
 We are making them understandable.”
+
+
+## Testing Strategy
+
+* Unit tests for keyword fallback engine
+* Integration tests using FastAPI TestClient
+* API endpoint validation
+* Edge case handling for user inputs
+
+## Google Cloud Usage
+
+* Cloud Run for backend deployment
+* Firestore for user state
+* Vertex AI for Gemini integration
+* Logging pipeline (simulated) for event tracking
+
