@@ -40,10 +40,10 @@ LOCATION = "us-central1"
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-MODEL_NAME = "gemini-1.0-pro"
+MODEL_NAME = "gemini-1.0-pro"  # gemini-1.5-flash returns 404 for this project
 
 # Module-level model instance — reused across all requests.
-model = GenerativeModel(MODEL_NAME)
+model = GenerativeModel(model_name=MODEL_NAME)
 
 # Conservative generation config — keeps responses factual and concise.
 _GENERATION_CONFIG = GenerationConfig(
@@ -55,15 +55,25 @@ _GENERATION_CONFIG = GenerationConfig(
 # ── System prompt ──────────────────────────────────────────────────────────────
 
 def _load_system_prompt() -> str:
-    """
-    Load the system prompt from gemini.md at the project root.
+    try:
+        from pathlib import Path
 
-    Loading from file (not hardcoding) ensures the AI behaviour
-    stays in sync with gemini.md as it evolves — one source of truth.
-    Raises FileNotFoundError at startup if gemini.md is missing.
-    """
-    prompt_path = Path(__file__).resolve().parents[2] / "gemini.md"
-    return prompt_path.read_text(encoding="utf-8")
+        # 🔥 try multiple safe paths
+        possible_paths = [
+            Path("/app/gemini.md"),
+            Path("./gemini.md"),
+        ]
+
+        for path in possible_paths:
+            if path.exists():
+                return path.read_text()
+
+        print("⚠️ gemini.md not found — using fallback prompt")
+        return "You are a neutral civic assistant."
+
+    except Exception as e:
+        print("⚠️ Failed loading gemini.md:", e)
+        return "You are a neutral civic assistant."
 
 
 # Loaded once at module import — not on every request.
@@ -399,23 +409,98 @@ def _build_party_context(parties: list) -> str:
     return "\n---\n".join(blocks)
 
 
-def _build_fallback_response(parties: list) -> dict:
-    """Return a safe, AI-free response listing party focus areas."""
+def _general_party_overview(parties: list) -> dict:
+    """Show top 3 parties when no keyword matches or no results found."""
     lines = []
     for p in parties[:3]:
         name = p.get("name", "Unknown Party")
         focus = ", ".join(p.get("focus_areas", []))
-        lines.append(f"• {name}: {focus}")
-    summary = "\n".join(lines) if lines else "No party details available."
+        lines.append(f"\u2022 {name}: {focus}")
+    body = "\n".join(lines) if lines else "No party details available."
     return {
-        "response": (
-            "AI currently unavailable. Showing basic party insights.\n\n" + summary
-        ),
-        "disclaimer": "Neutral civic info only.",
+        "response": "Here are major parties in your region:\n\n" + body,
+        "disclaimer": "This information is provided for awareness only and does not recommend or endorse any party.",
     }
 
 
-def chat_assist(message: str, region_id: str) -> dict:
+def keyword_fallback(message: str, parties: list) -> dict:
+    """
+    Weighted keyword-based fallback when AI is unavailable.
+
+    Scores every category against all words in the query, then picks
+    the highest-scoring category. Parties are then ranked by relevance
+    to that category and the top 3 are returned.
+
+    Keywords are aligned to the actual focus_areas used in seed_data.py.
+    """
+    words = message.lower().split()
+
+    # Keywords aligned to seed data focus_areas (Title Case stored, lowered here)
+    keywords_map = {
+        "education": ["education", "school", "college", "student", "literacy", "digital"],
+        "healthcare": ["health", "hospital", "doctor", "medical", "clinic", "healthcare"],
+        "employment": ["jobs", "employment", "career", "work", "youth", "startup", "entrepreneur"],
+        "agriculture": ["agriculture", "farm", "farmer", "crop", "rural", "krishi"],
+        "infrastructure": ["road", "transport", "infrastructure", "transit", "connectivity"],
+        "environment": ["environment", "climate", "pollution", "renewable", "energy", "forest", "green"],
+        "economy": ["economy", "growth", "inflation", "industry", "small", "business"],
+    }
+
+    # Score every category against query words
+    scores: dict[str, int] = {cat: 0 for cat in keywords_map}
+    for category, keywords in keywords_map.items():
+        for word in words:
+            if word in keywords:
+                scores[category] += 2          # exact match
+            elif any(word in k or k in word for k in keywords):
+                scores[category] += 1          # partial match
+
+    print("DEBUG: keyword scores =", scores)
+
+    best_category = max(scores, key=scores.get)
+
+    # No category matched at all — show general overview
+    if scores[best_category] == 0:
+        print("DEBUG: no keyword match — Using general overview")
+        return _general_party_overview(parties)
+
+    print("DEBUG: selected category =", best_category)
+
+    # Score each party by relevance to the best category
+    scored_parties = []
+    for p in parties:
+        party_score = 0
+        focus = " ".join(p.get("focus_areas", [])).lower()
+        policies = " ".join(p.get("key_policies", [])).lower()
+        if best_category in focus:
+            party_score += 2
+        if best_category in policies:
+            party_score += 1
+        scored_parties.append((party_score, p))
+
+    # Sort by descending relevance score, take top 3 with any score
+    top_parties = [
+        p for score, p in sorted(scored_parties, key=lambda x: x[0], reverse=True)
+        if score > 0
+    ][:3]
+
+    if not top_parties:
+        return _general_party_overview(parties)
+
+    lines = [f"\u2022 {p.get('name')}: {', '.join(p.get('focus_areas', []))}"
+             for p in top_parties]
+    return {
+        "response": (
+            f"Based on your interest in {best_category}, here are relevant parties:"
+            f"\n\n" + "\n".join(lines)
+        ),
+        "disclaimer": "This information is provided for awareness only and does not recommend or endorse any party.",
+        "source": "Smart Match",
+        "matched_category": best_category,
+    }
+
+
+def chat_assist(message: str, region_id: str, language: str = "en"):
     """
     Answer a user civic query using Firestore party data as context.
     Always returns {response, disclaimer}. Never raises.
@@ -424,10 +509,11 @@ def chat_assist(message: str, region_id: str) -> dict:
     from backend.services.parties import get_parties
 
     parties = get_parties(region_id)
+    
 
     if not parties:
         return {
-            "response": "No party data available for your region.",
+            "response": "Party information for your region is being loaded. Please check back shortly or explore the Party Explorer tab.",
             "disclaimer": "Neutral civic info only.",
         }
 
@@ -449,7 +535,7 @@ Rules:
 - End with: "This is neutral information for awareness only."
 """
 
-    print("DEBUG: Calling AI model for chat_assist")
+    print("DEBUG: Using AI")
     print("DEBUG: Region:", region_id)
 
     try:
@@ -457,12 +543,19 @@ Rules:
             prompt,
             generation_config=_GENERATION_CONFIG,
         )
-        print("DEBUG: AI success")
-        return {
-            "response": ai_response.text.strip(),
-            "disclaimer": "This information is neutral and for awareness only.",
-        }
+        text = ai_response.text.strip() if ai_response.text else ""
+        if text:
+            print("DEBUG: AI success")
+            return {
+                "response": text,
+                "disclaimer": "This information is neutral and for awareness only.",
+                "source": "AI",
+            }
+        # AI returned empty — fall through to keyword fallback
+        print("DEBUG: AI returned empty — Using FALLBACK")
 
     except Exception as e:
         print("ERROR in chat_assist AI call:", str(e))
-        return _build_fallback_response(parties)
+        print("DEBUG: Using FALLBACK")
+
+    return keyword_fallback(message, parties)

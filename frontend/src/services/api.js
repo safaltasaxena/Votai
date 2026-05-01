@@ -1,11 +1,10 @@
+
 /**
  * src/services/api.js
- * 
- * Centralized API service for interacting with the FastAPI backend.
- * Uses the proxy configured in vite.config.js (/api -> http://localhost:8000).
+ * Production-ready API service (works with Cloud Run backend)
  */
 
-const API_BASE = '/api';
+const BASE_URL = import.meta.env.VITE_API_URL;
 
 const handleResponse = async (response) => {
   if (!response.ok) {
@@ -16,11 +15,10 @@ const handleResponse = async (response) => {
 };
 
 export const api = {
-  // ── Journey ────────────────────────────────────────────────────────────────
+  // ── Journey ─────────────────────────────────────────
 
   createUser: async (userData) => {
-    // Backend expects: user_id, age, country, state, language, first_time_voter
-    const response = await fetch(`${API_BASE}/journey/onboard`, {
+    const response = await fetch(`${BASE_URL}/journey/onboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userData),
@@ -29,7 +27,7 @@ export const api = {
   },
 
   getCurrentStep: async (userId, regionId, message = null) => {
-    let url = `${API_BASE}/journey/${userId}/step?region=${regionId}`;
+    let url = `${BASE_URL}/journey/${userId}/step?region=${regionId}`;
     if (message) {
       url += `&message=${encodeURIComponent(message)}`;
     }
@@ -38,31 +36,44 @@ export const api = {
   },
 
   advanceStep: async (userId) => {
-    const response = await fetch(`${API_BASE}/journey/${userId}/advance`, {
+    const response = await fetch(`${BASE_URL}/journey/${userId}/advance`, {
       method: 'POST',
     });
     return handleResponse(response);
   },
 
-  // ── Elections ──────────────────────────────────────────────────────────────
+  // ── Elections ───────────────────────────────────────
 
   getTimeline: async (regionId) => {
-    const response = await fetch(`${API_BASE}/elections/${regionId}/timeline`);
+    const response = await fetch(`${BASE_URL}/elections/${regionId}/timeline`);
     return handleResponse(response);
   },
 
-  // ── Parties ────────────────────────────────────────────────────────────────
+  // ── Parties ─────────────────────────────────────────
 
   getParties: async (regionId) => {
-    const response = await fetch(`${API_BASE}/parties/${regionId}`);
+    const response = await fetch(`${BASE_URL}/parties/${regionId}`);
     return handleResponse(response);
   },
 
   compareParties: async (regionId, language = 'en') => {
-    // This calls the specific AI comparison endpoint (if backend supports)
-    // Or we can simulate it if the backend doesn't have a dedicated route yet.
-    // For this task, we assume the backend has /parties/{region_id}/compare
-    const response = await fetch(`${API_BASE}/parties/${regionId}/compare?language=${language}`);
+    const response = await fetch(`${BASE_URL}/parties/${regionId}/compare?language=${language}`);
+    return handleResponse(response);
+  },
+
+  // ── AI Chat ─────────────────────────────────────────
+
+  chat: async (message, region_id) => {
+    const url = `${BASE_URL}/ai/chat`;
+
+    console.log("API CALL:", url, { message, region_id });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, region_id }),
+    });
+
     return handleResponse(response);
   }
 };

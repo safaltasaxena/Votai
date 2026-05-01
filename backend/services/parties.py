@@ -1,19 +1,19 @@
-from backend.data.firestore_client import get_collection
+from backend.data.firestore_client import get_db
 
 
-def get_parties(region_id: str):
+def get_parties(region_id: str) -> list:
     """
     Fetch all parties for a given region_id from Firestore.
+    Uses a proper .where() query — same pattern as data_service.get_parties().
     """
-
     try:
-        docs = get_collection("parties")
-
-        # Filter by region_id
-        result = [
-            doc for doc in docs
-            if doc.get("region_id") == region_id
-        ]
+        docs = (
+            get_db()
+            .collection("parties")
+            .where("region_id", "==", region_id)
+            .stream()
+        )
+        result = [doc.to_dict() for doc in docs]
 
         print(f"DEBUG: Found {len(result)} parties for {region_id}")
 

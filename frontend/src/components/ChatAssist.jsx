@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { api } from '../services/api';
 
 const ChatAssist = ({ regionId }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,12 +17,8 @@ const ChatAssist = ({ regionId }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, region_id: regionId })
-      });
-      const data = await response.json();
+      console.log("SENDING:", { message, region_id: regionId });
+      const data = await api.chat(message, regionId);
       console.log("DEBUG CHAT RESPONSE:", data);
 
       const aiMsg = { role: 'ai', data };
