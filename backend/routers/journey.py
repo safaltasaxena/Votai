@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from backend.models.user import UserProfile
 from backend.models.response import VotaiResponse
 from backend.services import user_service, scenario_handler, ai_service
+from backend.services.utils import log_event
 from backend.services.flow_engine import get_step, get_next_step, calculate_readiness
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ async def onboard_user(req: OnboardRequest):
     try:
         profile = UserProfile(**req.model_dump())
         user_service.create_user(profile)
+        log_event("user_onboarded")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
