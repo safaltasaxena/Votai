@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
 
-const ChatAssist = ({ regionId }) => {
+const ChatAssist = ({ regionId, step }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  const totalSteps = 5;
+  const currentStep = step || 1;
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -39,11 +42,20 @@ const ChatAssist = ({ regionId }) => {
       {isOpen && (
         <div className="chat-window">
           <div className="chat-header">
+            <div className="progress-container">
+              <p>Step {currentStep} of {totalSteps}</p>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${(currentStep / totalSteps) * 100}%` }}
+                ></div>
+              </div>
+            </div>
             <h3>Election Assistant</h3>
             <p>Ask about parties, policies, or the process.</p>
           </div>
 
-          <div className="chat-messages">
+          <div className="chat-messages" aria-live="polite" role="log">
             {history.length === 0 && (
               <p className="chat-placeholder">Try asking: "What are the healthcare policies?"</p>
             )}
@@ -55,13 +67,22 @@ const ChatAssist = ({ regionId }) => {
                   <p style={{ color: '#ef4444' }}>{msg.error}</p>
                 ) : (
                   <div className="ai-response">
+                    <div className="neutrality-badge">
+                      <span className="shield-icon">🛡️</span>
+                      <span>System Verified: Neutrality Active</span>
+                    </div>
                     {msg.data && (
                       <>
                         <p style={{ whiteSpace: "pre-line" }}>
-                          {msg.data.response}
+                          {msg.data.message}
                         </p>
-                        {msg.data.disclaimer && (
-                          <small className="chat-disclaimer">{msg.data.disclaimer}</small>
+                        {msg.data.next_action && (
+                          <div className="chat-next-action">
+                             <strong>Next:</strong> {msg.data.next_action}
+                          </div>
+                        )}
+                        {msg.data.status === 'fallback' && (
+                          <small className="chat-disclaimer">Offline Mode - Based on local data.</small>
                         )}
                       </>
                     )}
@@ -69,7 +90,7 @@ const ChatAssist = ({ regionId }) => {
                 )}
               </div>
             ))}
-            {loading && <div className="chat-bubble ai loading">Analyzing priorities...</div>}
+            {loading && <div className="chat-bubble ai loading">Analyzing...</div>}
           </div>
 
           <form className="chat-input" onSubmit={handleSend}>

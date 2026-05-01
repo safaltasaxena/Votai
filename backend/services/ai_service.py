@@ -35,15 +35,10 @@ logger = logging.getLogger(__name__)
 
 # ── Vertex AI initialisation ───────────────────────────────────────────────────
 # Runs once when this module is first imported.
-PROJECT_ID = "votai-494905"
-LOCATION = "us-central1"
+vertexai.init(project=settings.project_id, location=settings.region)
 
-vertexai.init(project=PROJECT_ID, location=LOCATION)
-
-MODEL_NAME = "gemini-1.0-pro"  # gemini-1.5-flash returns 404 for this project
-
-# Module-level model instance — reused across all requests.
-model = GenerativeModel(model_name=MODEL_NAME)
+MODEL_PRIMARY = "gemini-1.5-pro"
+MODEL_FALLBACK = "gemini-1.5-flash"
 
 # Conservative generation config — keeps responses factual and concise.
 _GENERATION_CONFIG = GenerationConfig(
@@ -66,7 +61,7 @@ def _load_system_prompt() -> str:
 
         for path in possible_paths:
             if path.exists():
-                return path.read_text()
+                return path.read_text(encoding="utf-8")
 
         print("⚠️ gemini.md not found — using fallback prompt")
         return "You are a neutral civic assistant."
@@ -88,9 +83,47 @@ class AIResult:
     explanation: str
     action_items: list[str]
     disclaimer: str | None = None
+    status: str = "success"
 
 
 # ── Prompt templates ───────────────────────────────────────────────────────────
+
+def _prompt_chat_assist(message: str, context: str, language: str) -> str:
+    """Template 5 — Answer general civic queries with party context."""
+    return f"""
+ROLE:
+You are an AI Election Navigator — a neutral, factual assistant.
+
+CONTEXT:
+Respond in language: {language}
+Relevant Party Data:
+{context}
+
+USER QUERY:
+{message}
+
+TASK:
+Provide a neutral, factual answer or comparison based ONLY on the provided party data.
+
+CONSTRAINTS:
+- DO NOT recommend any party or candidate.
+- DO NOT rank parties or use words like "better", "best", "strongest".
+- If comparing, use bullet points and give equal weight to each party.
+- Keep the tone helpful but clinical.
+- If the user asks for a recommendation, politely decline and explain your neutrality.
+
+OUTPUT FORMAT:
+EXPLANATION:
+<your neutral answer or comparison>
+
+ACTIONS:
+- <action item 1>
+- <action item 2>
+
+NEXT ACTION:
+<single most important thing for the user to do>
+""".strip()
+
 
 def _prompt_explain_step(
     step_name: str,
@@ -262,33 +295,176 @@ NEXT ACTION:
 Consider which focus areas align with issues important to you — without pressure to choose.
 """.strip()
 
+def _prompt_generate_timeline(
+    region: str,
+    election_date: str,
+    registration_deadline: str,
+    verification_deadline: str,
+    process_steps: list[str],
+) -> str:
+    """Template 2 — Explain the election timeline for a region."""
+    steps_text = "\n".join(f"- {s}" for s in process_steps)
+    return f"""
+ROLE:
+You are an AI Election Navigator providing a neutral timeline explanation.
+
+CONTEXT:
+Region: {region}
+Election Date: {election_date}
+Registration Deadline: {registration_deadline}
+Verification Deadline: {verification_deadline}
+
+Process Steps:
+{steps_text}
+
+TASK:
+Summarise the key dates and what the user must do at each stage.
+Highlight any urgent upcoming deadlines.
+
+CONSTRAINTS:
+- Factual only. Do NOT add information not present in the context above.
+- Do NOT recommend any party or candidate.
+- Use simple language.
+
+OUTPUT FORMAT:
+EXPLANATION:
+<summary of timeline>
+
+ACTIONS:
+- <action item 1>
+- <action item 2>
+
+NEXT ACTION:
+<most urgent thing to do>
+""".strip()
+
+
+def _prompt_simplify_policy(policy_text: str, language: str) -> str:
+    """Template 3 — Simplify a policy statement into plain language."""
+    return f"""
+ROLE:
+You are an AI Election Navigator simplifying policy information.
+
+CONTEXT:
+Respond in language: {language}
+
+POLICY TEXT:
+{policy_text}
+
+TASK:
+Rewrite the above policy in simple, jargon-free language a first-time voter can understand.
+
+CONSTRAINTS:
+- Do NOT evaluate, praise, or criticise the policy.
+- Do NOT compare it to other parties' policies.
+- Neutral, factual tone only.
+- Maximum 3 sentences.
+
+OUTPUT FORMAT:
+EXPLANATION:
+<simplified policy in plain language>
+
+ACTIONS:
+- Learn more at your official election authority website.
+
+NEXT ACTION:
+Compare this with other parties' positions on the same topic for a complete picture.
+""".strip()
+
+
+def _prompt_compare_parties(
+    party_data: list[dict],
+    region: str,
+    language: str,
+) -> str:
+    """Template 4 — Present party information side-by-side in a neutral way."""
+    party_blocks = []
+    for party in party_data:
+        name = party.get("name", "Unknown")
+        focus = ", ".join(party.get("focus_areas", []))
+        policies = "\n  ".join(party.get("key_policies", []))
+        party_blocks.append(f"Party: {name}\nFocus Areas: {focus}\nKey Policies:\n  {policies}")
+
+    parties_text = "\n\n".join(party_blocks)
+
+    return f"""
+ROLE:
+You are an AI Election Navigator presenting neutral party information.
+
+CONTEXT:
+Region: {region}
+Respond in language: {language}
+
+PARTY DATA:
+{parties_text}
+
+TASK:
+Present each party's focus areas and policies clearly.
+Do NOT rank, compare favourably, or suggest any party is better.
+
+CONSTRAINTS:
+- No opinions. No recommendations. No ranking language.
+- Do NOT say phrases like "better", "stronger", "best choice".
+- Present each party in equal depth.
+- Factual tone only.
+
+OUTPUT FORMAT:
+EXPLANATION:
+<neutral summary of all parties presented>
+
+ACTIONS:
+- Review each party's official manifesto for complete details.
+- Verify information with your local election authority.
+
+NEXT ACTION:
+Consider which focus areas align with issues important to you — without pressure to choose.
+""".strip()
+
 
 # ── Core AI call ───────────────────────────────────────────────────────────────
 
 def call_gemini(prompt: str) -> AIResult:
     """
-    Execute a single Gemini call with the system prompt and return structured output.
-    This is the only function that touches the Gemini API for structured results.
+    Execute Gemini call with primary -> fallback strategy.
     """
-    _model = GenerativeModel(
-        model_name=MODEL_NAME,
-        system_instruction=_SYSTEM_PROMPT,
-        generation_config=_GENERATION_CONFIG,
-    )
 
+    raw_text = None
+
+    # Try primary model
     try:
+        _model = GenerativeModel(
+            model_name=MODEL_PRIMARY,
+            system_instruction=_SYSTEM_PROMPT,
+            generation_config=_GENERATION_CONFIG,
+        )
         response = _model.generate_content(prompt)
         raw_text = response.text.strip()
-        result = _parse_response(raw_text)
-        return _apply_safety_filter(result)
 
-    except Exception as exc:
-        logger.error("Gemini call failed: %s", exc)
-        return AIResult(
-            explanation="I'm unable to provide a response right now. Please try again shortly.",
-            action_items=["Please verify with your local election authority for guidance."],
-        )
+    except Exception as e:
+        logger.error("Primary model failed: %s", e)
 
+        # Try fallback model
+        try:
+            _model = GenerativeModel(
+                model_name=MODEL_FALLBACK,
+                system_instruction=_SYSTEM_PROMPT,
+                generation_config=_GENERATION_CONFIG,
+            )
+            response = _model.generate_content(prompt)
+            raw_text = response.text.strip()
+
+        except Exception as e2:
+            logger.error("Fallback model failed: %s", e2)
+
+            # 🔥 IMPORTANT: return EMPTY result (not fake message)
+            return AIResult(
+                explanation="",
+                action_items=[],
+                status="error"
+            )
+
+    result = _parse_response(raw_text)
+    return _apply_safety_filter(result)
 
 # ── Response parsing ───────────────────────────────────────────────────────────
 
@@ -409,153 +585,140 @@ def _build_party_context(parties: list) -> str:
     return "\n---\n".join(blocks)
 
 
-def _general_party_overview(parties: list) -> dict:
-    """Show top 3 parties when no keyword matches or no results found."""
-    lines = []
-    for p in parties[:3]:
-        name = p.get("name", "Unknown Party")
-        focus = ", ".join(p.get("focus_areas", []))
-        lines.append(f"\u2022 {name}: {focus}")
-    body = "\n".join(lines) if lines else "No party details available."
-    return {
-        "response": "Here are major parties in your region:\n\n" + body,
-        "disclaimer": "This information is provided for awareness only and does not recommend or endorse any party.",
-    }
-
-
 def keyword_fallback(message: str, parties: list) -> dict:
     """
-    Weighted keyword-based fallback when AI is unavailable.
-
-    Scores every category against all words in the query, then picks
-    the highest-scoring category. Parties are then ranked by relevance
-    to that category and the top 3 are returned.
-
-    Keywords are aligned to the actual focus_areas used in seed_data.py.
+    Advanced deterministic fallback engine with intent detection 
+    and multi-category matching.
     """
-    words = message.lower().split()
-
-    # Keywords aligned to seed data focus_areas (Title Case stored, lowered here)
+    text = message.lower()
+    words = text.split()
+    
+    # 1. Expanded Categories & Synonyms
     keywords_map = {
-        "education": ["education", "school", "college", "student", "literacy", "digital"],
-        "healthcare": ["health", "hospital", "doctor", "medical", "clinic", "healthcare"],
-        "employment": ["jobs", "employment", "career", "work", "youth", "startup", "entrepreneur"],
+        "healthcare": ["health", "hospital", "doctor", "medical", "clinic", "wellness", "medicine"],
+        "education": ["education", "school", "college", "student", "literacy", "teacher", "learning"],
+        "employment": ["jobs", "employment", "career", "work", "unemployment", "hiring"],
+        "women": ["women", "female", "safety", "empowerment", "gender"],
+        "youth": ["youth", "young", "students", "startup", "skill"],
+        "economy": ["economy", "growth", "inflation", "business", "tax", "finance"],
+        "infrastructure": ["road", "metro", "transport", "development", "bridge", "connectivity"],
+        "digital": ["internet", "digital", "technology", "tech", "online"],
         "agriculture": ["agriculture", "farm", "farmer", "crop", "rural", "krishi"],
-        "infrastructure": ["road", "transport", "infrastructure", "transit", "connectivity"],
-        "environment": ["environment", "climate", "pollution", "renewable", "energy", "forest", "green"],
-        "economy": ["economy", "growth", "inflation", "industry", "small", "business"],
     }
 
-    # Score every category against query words
-    scores: dict[str, int] = {cat: 0 for cat in keywords_map}
+    # 2. Weighted Scoring
+    scores = {cat: 0 for cat in keywords_map}
     for category, keywords in keywords_map.items():
-        for word in words:
-            if word in keywords:
-                scores[category] += 2          # exact match
-            elif any(word in k or k in word for k in keywords):
-                scores[category] += 1          # partial match
+        for keyword in keywords:
+            if keyword in words:
+                scores[category] += 3  # Exact word match
+            elif keyword in text:
+                scores[category] += 1  # Substring match
 
-    print("DEBUG: keyword scores =", scores)
+    # 3. Intent Detection
+    is_comparing = any(word in text for word in ["compare", "difference", "vs", "versus"])
+    is_seeking_best = any(word in text for word in ["best", "which", "top", "recommend"])
 
-    best_category = max(scores, key=scores.get)
-
-    # No category matched at all — show general overview
-    if scores[best_category] == 0:
-        print("DEBUG: no keyword match — Using general overview")
+    # Sort categories by score
+    sorted_cats = sorted([c for c in scores if scores[c] > 0], key=lambda x: scores[x], reverse=True)
+    
+    if not sorted_cats:
         return _general_party_overview(parties)
 
-    print("DEBUG: selected category =", best_category)
+    # 4. Multi-category logic: pick top 2 if scores are close
+    selected_cats = [sorted_cats[0]]
+    if len(sorted_cats) > 1 and scores[sorted_cats[1]] >= (scores[sorted_cats[0]] * 0.7):
+        selected_cats.append(sorted_cats[1])
 
-    # Score each party by relevance to the best category
-    scored_parties = []
+    # 5. Filter & Rank Parties
+    matched_parties = []
     for p in parties:
-        party_score = 0
-        focus = " ".join(p.get("focus_areas", [])).lower()
-        policies = " ".join(p.get("key_policies", [])).lower()
-        if best_category in focus:
-            party_score += 2
-        if best_category in policies:
-            party_score += 1
-        scored_parties.append((party_score, p))
-
-    # Sort by descending relevance score, take top 3 with any score
-    top_parties = [
-        p for score, p in sorted(scored_parties, key=lambda x: x[0], reverse=True)
-        if score > 0
-    ][:3]
+        p_score = 0
+        p_focus_list = [f.lower() for f in p.get("focus_areas", [])]
+        p_focus_blob = " ".join(p_focus_list)
+        for cat in selected_cats:
+            if cat in p_focus_list or cat in p_focus_blob:
+                p_score += 1
+        if p_score > 0:
+            matched_parties.append((p_score, p))
+    
+    # Sort and take top 3-5
+    top_parties = [p for score, p in sorted(matched_parties, key=lambda x: x[0], reverse=True)][:5]
 
     if not top_parties:
         return _general_party_overview(parties)
 
-    lines = [f"\u2022 {p.get('name')}: {', '.join(p.get('focus_areas', []))}"
-             for p in top_parties]
+    # 6. Natural Language Response Generation
+    cat_str = " and ".join(selected_cats)
+    header = f"I've analyzed the parties focusing on {cat_str}. "
+    
+    if is_seeking_best:
+        header += "While I cannot recommend a 'best' choice, here are the parties with established policies in these areas:\n\n"
+    elif is_comparing:
+        header += "Here is a comparison of parties active in these sectors:\n\n"
+    else:
+        header += "Here are the parties currently prioritizing these issues:\n\n"
+
+    lines = [f"\u2022 {p.get('name')}: {', '.join(p.get('focus_areas', []))}" for p in top_parties]
+    
     return {
-        "response": (
-            f"Based on your interest in {best_category}, here are relevant parties:"
-            f"\n\n" + "\n".join(lines)
-        ),
-        "disclaimer": "This information is provided for awareness only and does not recommend or endorse any party.",
-        "source": "Smart Match",
-        "matched_category": best_category,
+        "message": header + "\n".join(lines),
+        "next_action": "Compare their specific policy documents in the Party Explorer.",
+        "status": "fallback"
+    }
+
+
+def _general_party_overview(parties: list) -> dict:
+    """Richer general fallback when no keywords match."""
+    # Show up to 5 parties
+    display_parties = parties[:5]
+    lines = [f"\u2022 {p.get('name')}: {', '.join(p.get('focus_areas', []))}" for p in display_parties]
+    
+    body = "To help you get started, here is an overview of major parties in your region and their primary focus areas:\n\n"
+    body += "\n".join(lines) if lines else "Information for this region is currently being updated."
+    
+    return {
+        "message": body,
+        "next_action": "Try asking about a specific topic like 'jobs' or 'education'.",
+        "status": "fallback"
     }
 
 
 def chat_assist(message: str, region_id: str, language: str = "en"):
     """
-    Answer a user civic query using Firestore party data as context.
-    Always returns {response, disclaimer}. Never raises.
-    Falls back gracefully if the AI model is unavailable.
+    Answer a user civic query using a 3-layer model:
+    1. Scenarios (Deterministic)
+    2. AI (Gemini)
+    3. Keyword Match (Fallback)
     """
+    from backend.services.scenario_handler import handle as handle_scenario
     from backend.services.parties import get_parties
 
-    parties = get_parties(region_id)
-    
-
-    if not parties:
+    # Layer 1: Scenarios
+    scenario = handle_scenario(message)
+    if scenario:
         return {
-            "response": "Party information for your region is being loaded. Please check back shortly or explore the Party Explorer tab.",
-            "disclaimer": "Neutral civic info only.",
+            "message": f"### {scenario.title}\n\n" + "\n".join(f"- {s}" for s in scenario.steps),
+            "next_action": "Verify information with your local authority.",
+            "status": "success"
         }
 
-    party_context = _build_party_context(parties)
+    # Layer 2: AI
+    parties = get_parties(region_id)
+    if parties:
+        party_context = _build_party_context(parties)
+        prompt = _prompt_chat_assist(message, party_context, language)
 
-    prompt = f"""You are a neutral civic assistant.
+        try:
+            result = call_gemini(prompt)
+            if result.explanation and result.status == "success":
+                return {
+                    "message": result.explanation,
+                    "next_action": result.action_items[-1] if result.action_items else "Review party manifestos",
+                    "status": "success"
+                }
+        except Exception:
+            pass
 
-User query:
-{message}
-
-Party data:
-{party_context}
-
-Rules:
-- Do NOT recommend any party
-- Do NOT rank parties
-- Only compare based on policies
-- Keep answer short and structured
-- End with: "This is neutral information for awareness only."
-"""
-
-    print("DEBUG: Using AI")
-    print("DEBUG: Region:", region_id)
-
-    try:
-        ai_response = model.generate_content(
-            prompt,
-            generation_config=_GENERATION_CONFIG,
-        )
-        text = ai_response.text.strip() if ai_response.text else ""
-        if text:
-            print("DEBUG: AI success")
-            return {
-                "response": text,
-                "disclaimer": "This information is neutral and for awareness only.",
-                "source": "AI",
-            }
-        # AI returned empty — fall through to keyword fallback
-        print("DEBUG: AI returned empty — Using FALLBACK")
-
-    except Exception as e:
-        print("ERROR in chat_assist AI call:", str(e))
-        print("DEBUG: Using FALLBACK")
-
-    return keyword_fallback(message, parties)
+    # Layer 3: Fallback
+    return keyword_fallback(message, parties or [])

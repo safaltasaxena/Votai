@@ -354,7 +354,7 @@ const Journey = () => {
         {showToast && <div className="feedback-toast">✔ Step completed</div>}
 
         {/* Chat Assistant */}
-        <ChatAssist regionId={regionId} />
+        <ChatAssist regionId={regionId} step={current_step.step_number} />
       </div>
     </div>
   );

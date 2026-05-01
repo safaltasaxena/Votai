@@ -2,11 +2,11 @@ from pydantic_settings import BaseSettings
 import os
 
 class Settings(BaseSettings):
-    PROJECT_ID: str = os.getenv("PROJECT_ID", "votai-494905")
-    REGION: str = os.getenv("REGION", "us-central1")
-    FIRESTORE_DATABASE: str = os.getenv("FIRESTORE_DATABASE", "(default)")
-    APP_ENV: str = os.getenv("APP_ENV", "development")
-    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+    project_id: str = os.getenv("PROJECT_ID", "votai-494905")
+    region: str = os.getenv("REGION", "us-central1")
+    firestore_database: str = os.getenv("FIRESTORE_DATABASE", "(default)")
+    app_env: str = os.getenv("APP_ENV", "development")
+    cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
 
     class Config:
         env_file = ".env"
@@ -14,6 +14,6 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self):
-        return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+        return [o.strip() for o in self.cors_origins.split(",")]
 
 settings = Settings()
