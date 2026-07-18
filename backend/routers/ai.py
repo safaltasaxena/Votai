@@ -5,7 +5,7 @@ backend/routers/ai.py — AI-specific endpoints like chat assist.
 from typing import Optional
 from fastapi import APIRouter, Body
 from pydantic import BaseModel
-from backend.services import ai_service
+from services import ai_service
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 

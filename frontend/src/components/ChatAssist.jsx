@@ -28,7 +28,7 @@ const ChatAssist = ({ regionId, step }) => {
       setHistory(prev => [...prev, aiMsg]);
     } catch (err) {
       console.error("Chat failed:", err);
-      setHistory(prev => [...prev, { role: 'ai', error: 'Assistant unavailable.' }]);
+      setHistory(prev => [...prev, { role: 'ai', error: 'Connecting to civic system...' }]);
     } finally {
       setLoading(false);
     }

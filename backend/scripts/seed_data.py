@@ -9,7 +9,7 @@ from datetime import datetime
 # Add project root to path so we can import backend modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from backend.data.firestore_client import set_document
+from data.firestore_client import set_document
 
 # ── Regions ───────────────────────────────────────────────────────────────────
 

@@ -17,7 +17,7 @@ const Timeline = () => {
         setTimeline(data.timeline);
       } catch (err) {
         console.error("Timeline fetch failed:", err);
-        setError("Could not load election timeline.");
+        setError("Connecting to civic system...");
       } finally {
         setLoading(false);
       }

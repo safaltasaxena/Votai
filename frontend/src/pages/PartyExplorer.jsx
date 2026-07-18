@@ -59,7 +59,7 @@ const PartyExplorer = () => {
         setDisclaimer(data.disclaimer);
       } catch (err) {
         console.error("Parties fetch failed:", err);
-        setError("Could not load party information.");
+        setError("Connecting to civic system...");
       } finally {
         setLoading(false);
       }

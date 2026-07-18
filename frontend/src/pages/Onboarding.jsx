@@ -39,6 +39,17 @@ const Onboarding = () => {
       return;
     }
 
+    const ageNum = parseInt(formData.age, 10);
+    if (Number.isNaN(ageNum)) {
+      setError("Please enter a valid age.");
+      return;
+    }
+
+    if (ageNum < 18) {
+      setError("You must be at least 18 years old to use this service.");
+      return;
+    }
+
     setLoading(true);
     try {
       const userId = `user_${Math.random().toString(36).substr(2, 9)}`;
@@ -46,7 +57,7 @@ const Onboarding = () => {
       
       const payload = {
         user_id: userId,
-        age: parseInt(formData.age),
+        age: ageNum,
         country: formData.country,
         state: selectedRegion.name,
         language: formData.language,
@@ -64,7 +75,7 @@ const Onboarding = () => {
       navigate('/journey');
     } catch (err) {
       console.error("Onboarding failed:", err);
-      setError(err.message || "Failed to start journey. Please try again.");
+      setError(err.message || "Connecting to civic system...");
     } finally {
       setLoading(false);
     }

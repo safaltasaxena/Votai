@@ -13,7 +13,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from backend.services.data_service import get_election
+from services.data_service import get_election
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/elections", tags=["Elections"])

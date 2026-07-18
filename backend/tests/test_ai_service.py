@@ -1,5 +1,5 @@
 import pytest
-from backend.services.ai_service import keyword_fallback
+from services.ai_service import keyword_fallback
 
 # Sample data for testing
 MOCK_PARTIES = [

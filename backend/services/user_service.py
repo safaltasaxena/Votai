@@ -14,10 +14,10 @@ Depends on:
 import logging
 from datetime import datetime, timezone
 
-from backend.data.firestore_client import get_document, set_document, update_document
-from backend.models.user import UserProfile
-from backend.models.progress import UserProgress
-from backend.services.flow_engine import (
+from data.firestore_client import get_document, set_document, update_document
+from models.user import UserProfile
+from models.progress import UserProgress
+from services.flow_engine import (
     FIRST_STEP,
     LAST_STEP,
     build_step_status,

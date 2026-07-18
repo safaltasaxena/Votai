@@ -55,8 +55,8 @@ const Journey = () => {
       }
 
     } catch (err) {
-      console.error("Failed to fetch step:", err);
-      setError(err.message || "Could not load your journey. Please try again.");
+      console.error("Connecting to civic system...", err);
+      setError(err.message || "Connecting to civic system...");
     } finally {
       setLoading(false);
     }

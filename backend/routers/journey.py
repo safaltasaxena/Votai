@@ -4,11 +4,11 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.models.user import UserProfile
-from backend.models.response import VotaiResponse
-from backend.services import user_service, scenario_handler, ai_service
-from backend.services.utils import log_event
-from backend.services.flow_engine import get_step, get_next_step, calculate_readiness
+from models.user import UserProfile
+from models.response import VotaiResponse
+from services import user_service, scenario_handler, ai_service
+from services.utils import log_event
+from services.flow_engine import get_step, get_next_step, calculate_readiness
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/journey", tags=["Journey"])
@@ -35,6 +35,10 @@ async def onboard_user(req: OnboardRequest):
         log_event("user_onboarded")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Onboard failed for user_id=%s: %s", req.user_id, e)
+        # Surface a clearer service-unavailable message for storage errors.
+        raise HTTPException(status_code=503, detail="Failed to persist user profile: backend storage unavailable")
 
     progress = user_service.get_progress(req.user_id)
 

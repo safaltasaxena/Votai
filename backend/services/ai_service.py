@@ -1,8 +1,8 @@
 """
-services/ai_service.py — Vertex AI (Gemini) integration layer.
+services/ai_service.py — OpenAI integration layer.
 
 Responsibilities:
-  - Initialise the Vertex AI client once at import time.
+  - Initialise the OpenAI client once at import time.
   - Load the system prompt from gemini.md (single source of truth).
   - Expose reusable prompt-building functions for each use case.
   - Execute a single Gemini call per request (MVP strategy).
@@ -26,26 +26,19 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
 
-from backend.config import settings
+
+
+from ai.ai_client import generate_content
 
 logger = logging.getLogger(__name__)
 
-# ── Vertex AI initialisation ───────────────────────────────────────────────────
+# ── OpenAI initialisation ───────────────────────────────────────────────────
 # Runs once when this module is first imported.
-vertexai.init(project=settings.project_id, location=settings.region)
 
-MODEL_PRIMARY = "gemini-1.5-pro"
-MODEL_FALLBACK = "gemini-1.5-flash"
 
 # Conservative generation config — keeps responses factual and concise.
-_GENERATION_CONFIG = GenerationConfig(
-    temperature=0.2,        # Low temperature = more predictable, factual output.
-    max_output_tokens=512,  # Enough for structured step explanations.
-    top_p=0.8,
-)
+
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
@@ -55,19 +48,19 @@ def _load_system_prompt() -> str:
 
         # 🔥 try multiple safe paths
         possible_paths = [
-            Path("/app/gemini.md"),
-            Path("./gemini.md"),
+            Path(__file__).resolve().parent.parent / "ai" / "openai.md",
+            Path("backend/ai/openai.md"),
         ]
 
         for path in possible_paths:
             if path.exists():
                 return path.read_text(encoding="utf-8")
 
-        print("⚠️ gemini.md not found — using fallback prompt")
+        print("⚠️ openai.md not found — using fallback prompt")
         return "You are a neutral civic assistant."
 
     except Exception as e:
-        print("⚠️ Failed loading gemini.md:", e)
+        print("⚠️ Failed loading openai.md:", e)
         return "You are a neutral civic assistant."
 
 
@@ -423,45 +416,26 @@ Consider which focus areas align with issues important to you — without pressu
 
 # ── Core AI call ───────────────────────────────────────────────────────────────
 
-def call_gemini(prompt: str) -> AIResult:
+def call_ai(prompt: str) -> AIResult:
     """
-    Execute Gemini call with primary -> fallback strategy.
+    Execute an AI call using OpenRouter/OpenAI.
     """
 
-    raw_text = None
+   
 
-    # Try primary model
     try:
-        _model = GenerativeModel(
-            model_name=MODEL_PRIMARY,
-            system_instruction=_SYSTEM_PROMPT,
-            generation_config=_GENERATION_CONFIG,
-        )
-        response = _model.generate_content(prompt)
-        raw_text = response.text.strip()
-
+        raw_text = generate_content(
+            user_prompt=prompt,
+            system_prompt=_SYSTEM_PROMPT,
+        ).strip()
     except Exception as e:
-        logger.error("Primary model failed: %s", e)
+        logger.error("AI model failed: %s", e)
 
-        # Try fallback model
-        try:
-            _model = GenerativeModel(
-                model_name=MODEL_FALLBACK,
-                system_instruction=_SYSTEM_PROMPT,
-                generation_config=_GENERATION_CONFIG,
-            )
-            response = _model.generate_content(prompt)
-            raw_text = response.text.strip()
-
-        except Exception as e2:
-            logger.error("Fallback model failed: %s", e2)
-
-            # 🔥 IMPORTANT: return EMPTY result (not fake message)
-            return AIResult(
-                explanation="",
-                action_items=[],
-                status="error"
-            )
+        return AIResult(
+            explanation="",
+            action_items=[],
+            status="error"
+        )
 
     result = _parse_response(raw_text)
     return _apply_safety_filter(result)
@@ -469,7 +443,7 @@ def call_gemini(prompt: str) -> AIResult:
 # ── Response parsing ───────────────────────────────────────────────────────────
 
 def _parse_response(raw: str) -> AIResult:
-    """Parse Gemini's structured output into an AIResult."""
+    """Parse ai's structured output into an AIResult."""
     explanation = _extract_section(raw, "EXPLANATION")
     actions_block = _extract_section(raw, "ACTIONS")
     next_action = _extract_section(raw, "NEXT ACTION")
@@ -512,7 +486,7 @@ _VERIFICATION_NOTE = (
 
 
 def _apply_safety_filter(result: AIResult) -> AIResult:
-    """Post-process the AI result to enforce neutrality constraints from gemini.md."""
+    """Post-process the AI result to enforce neutrality constraints from openai.md."""
     cleaned_explanation = result.explanation
     for pattern in _BANNED_PATTERNS:
         cleaned_explanation = pattern.sub("[removed]", cleaned_explanation)
@@ -542,7 +516,7 @@ def explain_step(
 ) -> AIResult:
     """Public wrapper for step explanation. Entry point for journey router."""
     prompt = _prompt_explain_step(step_name, step_description, user_message, region, language)
-    return call_gemini(prompt)
+    return call_ai(prompt)
 
 
 def generate_timeline(
@@ -556,19 +530,19 @@ def generate_timeline(
     prompt = _prompt_generate_timeline(
         region, election_date, registration_deadline, verification_deadline, process_steps
     )
-    return call_gemini(prompt)
+    return call_ai(prompt)
 
 
 def simplify_policy(policy_text: str, language: str) -> AIResult:
     """Public wrapper for policy simplification. Entry point for parties router."""
     prompt = _prompt_simplify_policy(policy_text, language)
-    return call_gemini(prompt)
+    return call_ai(prompt)
 
 
 def compare_parties(party_data: list[dict], region: str, language: str) -> AIResult:
     """Public wrapper for neutral party presentation. Entry point for parties router."""
     prompt = _prompt_compare_parties(party_data, region, language)
-    return call_gemini(prompt)
+    return call_ai(prompt)
 
 
 # ── Chat Assist ────────────────────────────────────────────────────────────────
@@ -688,11 +662,11 @@ def chat_assist(message: str, region_id: str, language: str = "en"):
     """
     Answer a user civic query using a 3-layer model:
     1. Scenarios (Deterministic)
-    2. AI (Gemini)
+    2. AI 
     3. Keyword Match (Fallback)
     """
-    from backend.services.scenario_handler import handle as handle_scenario
-    from backend.services.parties import get_parties
+    from services.scenario_handler import handle as handle_scenario
+    from services.parties import get_parties
 
     # Layer 1: Scenarios
     scenario = handle_scenario(message)
@@ -710,7 +684,7 @@ def chat_assist(message: str, region_id: str, language: str = "en"):
         prompt = _prompt_chat_assist(message, party_context, language)
 
         try:
-            result = call_gemini(prompt)
+            result = call_ai(prompt)
             if result.explanation and result.status == "success":
                 return {
                     "message": result.explanation,

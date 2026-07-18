@@ -3,9 +3,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import settings
+from config import settings
 #print("CORS:", settings.cors_origins_list)
-from backend.routers import journey, elections, parties, ai
+from routers import journey, elections, parties, ai
 
 app = FastAPI(
     title="Votai API",

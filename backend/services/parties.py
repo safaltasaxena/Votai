@@ -1,4 +1,4 @@
-from backend.data.firestore_client import get_db
+from data.firestore_client import get_db
 
 
 def get_parties(region_id: str) -> list:

@@ -17,7 +17,7 @@ Firestore collections accessed: `elections`, `parties`.
 import logging
 from typing import Optional
 
-from backend.data.firestore_client import get_document, get_db
+from data.firestore_client import get_document, get_db
 
 logger = logging.getLogger(__name__)
 

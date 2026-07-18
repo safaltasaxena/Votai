@@ -14,8 +14,8 @@ Responsibilities:
 No Firestore access. No AI calls. Fully deterministic.
 """
 
-from backend.models.response import StepInfo
-from backend.models.progress import StepState
+from models.response import StepInfo
+from models.progress import StepState
 
 
 # ── Journey registry ──────────────────────────────────────────────────────────

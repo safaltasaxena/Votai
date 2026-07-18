@@ -1,12 +1,11 @@
-
 /**
  * src/services/api.js
- * Production-ready API service (works with Cloud Run backend)
+ * Production-ready API service (Cloud Run optimized)
  */
 
 const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
-// Production logging to catch environment variable misconfigurations
+// Debug log (helps in prod)
 if (!BASE_URL) {
   console.error("CRITICAL: VITE_API_URL is not defined. API calls will fail.");
 }
@@ -20,23 +19,35 @@ const handleResponse = async (response) => {
 };
 
 /**
- * Hardened fetch with 10s timeout and 1-time retry for network flakiness
+ * Cloud Run optimized fetch:
+ * - Longer timeout (handles cold starts)
+ * - Retry on failure (except AbortError)
  */
 const safeFetch = async (url, options = {}, retries = 1) => {
-  const timeout = 10000;
+  // 🔥 KEY FIX: dynamic timeout (dev vs prod)
+  const timeout = import.meta.env.DEV ? 10000 : 25000;
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+
     clearTimeout(id);
     return response;
+
   } catch (err) {
     clearTimeout(id);
+
+    // Retry only if NOT aborted
     if (retries > 0 && err.name !== 'AbortError') {
       console.warn(`Retrying API call: ${url}`);
       return safeFetch(url, options, retries - 1);
     }
+
     throw err;
   }
 };
@@ -101,16 +112,19 @@ export const api = {
       });
 
       const data = await handleResponse(response);
+
       return {
         message: data.message || data.response || "I've updated your journey information.",
         next_action: data.next_action || "Continue",
         status: "success"
       };
+
     } catch (error) {
       console.error("Chat API Failure:", error);
-      // Deterministic fallback response to prevent UI crash
+
+      // 🔥 Graceful fallback (no crash, no empty UI)
       return {
-        message: "I'm having trouble connecting to the AI right now. Please follow the steps in the guided journey above.",
+        message: "I'm having trouble connecting right now, but you can continue using the guided steps above.",
         next_action: "Continue Journey",
         status: "fallback"
       };

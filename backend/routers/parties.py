@@ -17,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from backend.services.data_service import get_parties, get_party
+from services.data_service import get_parties, get_party
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/parties", tags=["Parties"])
